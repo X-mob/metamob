@@ -1,0 +1,4 @@
+node_modules
+contracts/.deps
+contracts/artifacts
+contracts/interfaces/artifacts
