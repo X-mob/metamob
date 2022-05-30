@@ -9,10 +9,10 @@ you can join a mob to invest NFT:
 
 # What X-Mob product features bring in?
 
-> Allowing everyone to obtain blue chip NFT shares at low cost through the group purchase design,
-> Getting rid of the inefficiency of investment DAO’s investing in NFT in terms of selling through the design of front-loaded voting
-> Automatic delivery through smart contracts to solve the problem of NFT shares (fragments) easily decoupled from the market
-> The design of group purchase + automatic delivery enables the smallest size of NFT index issuance so that any user can issue an NFT index through X-Mob
+- Allowing everyone to obtain blue chip NFT shares at low cost through the group purchase design
+- Getting rid of the inefficiency of investment DAO’s investing in NFT in terms of selling through the design of front-loaded voting
+- Automatic delivery through smart contracts to solve the problem of NFT shares (fragments) easily decoupled from the market
+- The design of group purchase + automatic delivery enables the smallest size of NFT index issuance so that any user can issue an NFT index through X-Mob
 
 # Deployment
 * `npm run deploy` 
