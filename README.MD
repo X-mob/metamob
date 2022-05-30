@@ -4,19 +4,19 @@
 It is easy to BUY something with your friends，but sucks in selling it.
 X-mob bring a new way to buy and sell nfts smooth.
 
-**you can create a MOB to invest NFT with your friends*:
+*you can create a MOB to invest NFT with your friends:
 
 ![5create a mob](https://user-images.githubusercontent.com/47583564/170903279-a0779d8b-335d-4e38-a3d8-c25e75c722c9.png)
 
-**you can join a mob to invest NFT*:
+*you can join a mob to invest NFT:
 
 ![image](https://user-images.githubusercontent.com/47583564/170903677-c88163e0-5f4d-42cf-a11e-04ac92dec02e.png)
 
-**Then you just need to wait the smart contract sell the NFTs you invest.
+*Then you just need to wait the smart contract sell the NFTs you invest.
 
-**No DAO voting.
+*No DAO voting.
 
-**No worry about you invest share price with below the opensea price.
+*No worry about you invest share price will below the opensea price.
 
 ![6my profile](https://user-images.githubusercontent.com/47583564/170905833-fe806034-9000-4fd2-b207-c35cc5512e56.png)
 
