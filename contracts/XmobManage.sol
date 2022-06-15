@@ -5,13 +5,15 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./XmobExchangeProxy.sol";
 
+import "./interfaces/XmobExchangeCoreInterface.sol";
+
 contract XmobMange is Ownable {
 
     address public exchangeProxy;
 
-    uint8 feeRate;
+    uint8 public feeRate;//1000/1000
 
-    uint256 mobsTotal;
+    uint256 public mobsTotal;
 
     mapping(address => Mob) public mobs;
     mapping(uint => address) public mobsById;
@@ -20,6 +22,9 @@ contract XmobMange is Ownable {
 
     struct Mob{
         uint raisedTotal;
+        uint rasiedAmountDeadline;
+        uint deadline;
+        uint fee;
         address creater;
         string name;
     }
@@ -29,21 +34,24 @@ contract XmobMange is Ownable {
     event Withdraw(address addr, uint amt);
     event SetOricle(address indexed admin, bool state);
     event FeeSet(uint8 feeRate);
-    event MobCreate(address indexed creater, address indexed token, uint indexed tokenId, address proxy, uint raisedTotal, uint takeProfitPrice, uint stopLossPrice, uint endTime, string name);
+    event MobCreate(address indexed creater, address indexed token, uint indexed tokenId, address proxy, uint raisedTotal, uint takeProfitPrice, uint stopLossPrice, uint fee, uint deadline, uint rasiedAmountDeadline, string name);
+    event MobDeposit(address indexed mob, address indexed sender, uint256 amt);
     event DepositEth(address sender, uint256 amt);
-
 
     constructor(address proxy){
         setProxy(proxy);
     }
 
-
     receive () payable external{
-        emit DepositEth(msg.sender, msg.value);
+        if(msg.value > 0){
+            emit DepositEth(msg.sender, msg.value);
+        }  
     }
 
     fallback () payable external {
-        emit DepositEth(msg.sender, msg.value);
+        if(msg.value > 0){
+            emit DepositEth(msg.sender, msg.value);
+        }
     }
 
 
@@ -51,36 +59,34 @@ contract XmobMange is Ownable {
      * @dev create mob
      */
     function createMob(
-        address _paymentToken,
         address _token,
         uint _tokenId,
         uint _raisedTotal,
         uint _takeProfitPrice,
         uint _stopLossPrice,
-        uint _endTime,
-        bytes memory _callData,
+        uint _rasiedAmountDeadline,
+        uint _deadline,
         string memory _mobName) 
         public 
         payable
-        returns(uint)
+        returns(address)
     {
-        require(_endTime > block.timestamp && _takeProfitPrice > _stopLossPrice && _raisedTotal > 0,"Params error");
+        require(_deadline > block.timestamp && _takeProfitPrice > _stopLossPrice && _raisedTotal > 0,"Params error");
 
         uint fee = _raisedTotal * feeRate / 1000;
 
         XmobExchangeProxy mob = new XmobExchangeProxy{value:msg.value}(
             exchangeProxy, 
             abi.encodeWithSelector(
-                bytes4(keccak256(bytes("initialize(address,address,address,uint256,uint256,uint256,uint256,uint256,bytes,string)"))),
+                bytes4(keccak256(bytes("initialize(address,address,uint256,uint256,uint256,uint256,uint256,uint256,string)"))),
                 msg.sender,
-                _paymentToken,
                 _token,
                 fee,
                 _raisedTotal,
                 _takeProfitPrice,
                 _stopLossPrice,
-                _endTime,
-                _callData,
+                _rasiedAmountDeadline,
+                _deadline,
                 _mobName
             )
         );
@@ -93,21 +99,50 @@ contract XmobMange is Ownable {
         mobInfo.creater = msg.sender;
         mobInfo.raisedTotal = _raisedTotal;
         mobInfo.name = _mobName;   
+        mobInfo.rasiedAmountDeadline = _rasiedAmountDeadline;
+        mobInfo.deadline = _deadline;
+        mobInfo.fee = fee;
         
         emit MobCreate(
-            msg.sender,
+            mobInfo.creater,
             _token,
             _tokenId,
             address(mob),
             _raisedTotal,
             _takeProfitPrice,
             _stopLossPrice,
-            _endTime,
-            _mobName
+            mobInfo.fee,
+            mobInfo.deadline,
+            mobInfo.rasiedAmountDeadline,
+            mobInfo.name
         );
 
-        return mobsTotal;
+        if(msg.value > 0){
+            emit MobDeposit(address(mob),msg.sender, msg.value);
+        }
+
+        return address(mob);
     }
+
+
+    /** @dev depost eth for mob */
+    function mobDeposit(address mob) public payable 
+    {      
+        require(msg.value > 0,"ETH gt 0");
+
+        Mob storage mobInfo = mobs[mob];
+        require(mobInfo.creater != address(0),"Mob not exists");
+        require(mobInfo.deadline > block.timestamp,"Mob Expired");
+        
+        XmobExchangeCoreInterface mobCore = XmobExchangeCoreInterface(mob);
+
+        require(mobCore.amountTotal() + msg.value <= mobInfo.raisedTotal,"Insufficient quota");
+
+        mobCore.joinPay{value:msg.value}(msg.sender);
+
+        emit MobDeposit(mob, msg.sender, msg.value);
+    }
+
 
     /** @dev set fee */
     function setFee(uint8 _feeRate) public onlyOwner 
@@ -134,7 +169,7 @@ contract XmobMange is Ownable {
         setProxy(proxy);
     }
 
-
+    /** @dev set core proxy  */
     function setProxy(address proxy) internal 
     {
         uint size;

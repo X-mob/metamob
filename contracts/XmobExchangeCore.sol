@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.5;
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
 
 import "./interfaces/NftCommon.sol";
-import "./interfaces/Weth.sol";
+import "./interfaces/Weth9.sol";
 import "./interfaces/WyvernProxyRegister.sol";
 import "./interfaces/WyvernExchange.sol";
 
@@ -17,50 +19,52 @@ interface XmobManage {
 
 contract XmobExchagneCore is Initializable, OwnableUpgradeable, UUPSUpgradeable{
 
+    using SafeMath for uint256;
+
     string constant public version = "1.0.0";
 
-    /** @dev WyvernExchange Opensea core  */
-    WyvernExchange private wyvernExhcange = WyvernExchange(0xdD54D660178B28f6033a953b0E55073cFA7e3744);
-
-    /** @dev WyvernProxyRegister Opensea proxy  */
-    WyvernProxyRegister private wyvernProxyRegister = WyvernProxyRegister(0x1E525EEAF261cA41b809884CBDE9DD9E1619573A);
-
-    /** @dev WETH ERC20 */
-    WETH private weth = WETH(0xc778417E063141139Fce010982780140Aa0cD5Ab);
-    
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
     bytes4 constant internal MAGICVALUE = 0x1626ba7e;
 
+     /** @dev Wyvern Token transfer Opensea   */
+    address constant wyvernTokenTransferProxy = 0xCdC9188485316BF6FA416d02B4F680227c50b89e;
+
+    /** @dev WyvernExchange Opensea core  */
+    address constant wyvernExhcangeCore = 0xdD54D660178B28f6033a953b0E55073cFA7e3744;
+
+    /** @dev WyvernProxyRegister Opensea proxy  */
+    address constant wyvernProxyRegister = 0x1E525EEAF261cA41b809884CBDE9DD9E1619573A;
+
+    /** @dev WETH ERC20 */
+    address constant weth = 0xc778417E063141139Fce010982780140Aa0cD5Ab;
+    
+
      /** @dev Fee Account */
-    address public feeRecipient;
     address public creater;
-    address public paymentToken;
     address public token;
     uint256 public amountTotal;
     uint256 public raisedTotal;
     uint256 public takeProfitPrice;
     uint256 public stopLossPrice;
-    uint256 public endTime;
+    uint256 public raisedAmountDeadline;
+    uint256 public deadline;
     uint256 public cost;
     uint256 public fee;
     bool    public settlementState;
-
-    bytes   public callData;
     string  public mobName;
 
     address[] public members;
 
     mapping(address => uint) public memberDetails;
 
-    mapping(bytes32 => bool) public signatureHashs;
-
     mapping(address => uint256) public settlements;
 
     event MemberJoin(address member, uint256 value);
-    event Exchanged(address indexed buyer, address indexed seller, bytes32 indexed hash);
+    event Exchanged(address indexed buyer, address indexed seller);
     event Settlement(uint256 total, uint256 time);
     event DepositEth(address sender, uint256 amt);
     event Claim(address member, uint amt);
+    event Divestment(address member, uint amt);
 
 
     /** 
@@ -72,53 +76,68 @@ contract XmobExchagneCore is Initializable, OwnableUpgradeable, UUPSUpgradeable{
         _;
     }
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
+    // Whether the raising has been completed
+    modifier completed(){
+        require(raisedTotal == amountTotal,"Not started");
+         _;
+    }
+
+    // @custom:oz-upgrades-unsafe-allow constructor
     constructor() initializer {}
 
-     
     function initialize(
         address _creater,
-        address _paymentToken,
         address _token,
         uint _fee,
         uint _raisedTotal,
         uint _takeProfitPrice,
         uint _stopLossPrice,
-        uint _endTime,
-        bytes memory _callData,
+        uint _rasiedAmountDeadline,
+        uint _deadline,
         string memory _mobName    
     ) initializer public payable {
+
         __Ownable_init();
         __UUPSUpgradeable_init();
 
         require(_fee < _raisedTotal,"Fee error");
-        require(_endTime > block.timestamp,"EndTime gt now");
+        require(_deadline > _rasiedAmountDeadline,"Deadline error");
+        require(_rasiedAmountDeadline > block.timestamp,"EndTime gt now");
 
-        feeRecipient = msg.sender;
         creater = _creater;
-        paymentToken = _paymentToken;
         token = _token;
         fee = _fee;
         raisedTotal = _raisedTotal;
         takeProfitPrice = _takeProfitPrice;
         stopLossPrice = _stopLossPrice;
-        endTime = _endTime;
-        callData = _callData;
+        deadline = _deadline;
+        raisedAmountDeadline = _rasiedAmountDeadline;
         mobName = _mobName;
 
         if(msg.value > 0){
             memberDeposit(_creater, msg.value);
         }
-    }
 
+        // regisger Opensea proxy
+        WyvernProxyRegister wyvernProxy = WyvernProxyRegister(wyvernProxyRegister);
+        wyvernProxy.registerProxy();
+
+        //Approve All Token Nft-Id For Opensea proxy
+        NftCommon(_token).setApprovalForAll(
+            wyvernProxy.proxies(address(this)),
+            true
+        );
+
+        //Approve Weth for opensea wyvernTokenTransferProxy
+        WETH9(weth).approve(wyvernTokenTransferProxy, raisedTotal);
+    }   
 
     /**
     * @notice UUPS upgrade authorize
     */
     function _authorizeUpgrade(address newImplementation) internal view override
     {
-        require(newImplementation != address(0));
-        require(msg.sender == owner());
+        require(newImplementation != address(0) && msg.sender == owner());
     }    
 
 
@@ -129,38 +148,34 @@ contract XmobExchagneCore is Initializable, OwnableUpgradeable, UUPSUpgradeable{
         bytes32 _hash,
         bytes calldata _signature
     ) external view returns (bytes4) {
-        // Variables are not scoped in Solidity.
-        if(signatureHashs[_hash] && _signature.length > 0){
+
+        //TODO ECDSA ECDSA.recover(hash, v, r, s); 
+    
+        if(XmobManage(owner()).oricles(ECDSA.recover(_hash, _signature))){
             return MAGICVALUE;
-        } else {
-            return 0xffffffff;
         }
+        return 0x1726ba12;
     }
 
     //weth swap
     receive () payable external{
-        emit DepositEth(msg.sender, msg.value);
-    }
-
-    fallback () payable external {
-        emit DepositEth(msg.sender, msg.value);
+        if(msg.value > 0){
+            emit DepositEth(msg.sender,msg.value);
+        }    
     }
 
     /**
      * @notice members join pay ETH
      */
-    function joinPay() payable public
+    function joinPay(address member) payable public onlyOwner
     {
-        memberDeposit(msg.sender, msg.value);
+        memberDeposit(member, msg.value);
     }
-
-    function balance()public view returns(uint){
-        return address(this).balance;
-    }
-
+    
     function memberDeposit(address addr, uint amt) internal 
     {
         require(amt > 0,"Value must gt 0");
+        require(raisedAmountDeadline > block.timestamp,"Fundraising closed");
         require(raisedTotal > amountTotal,"Insufficient quota");
         require(raisedTotal >= amountTotal + amt,"Exceeding the limit");
 
@@ -171,12 +186,44 @@ contract XmobExchagneCore is Initializable, OwnableUpgradeable, UUPSUpgradeable{
 
         amountTotal += amt;
 
+        //swap to WETH
+        WETH9(weth).deposit{value:amt}();
+
         emit MemberJoin(addr, amt);
+    }
+
+    /** @notice withdraw stake  */
+    function divestment() public  
+    {
+        require(block.timestamp > raisedAmountDeadline,"fund raising");
+        require(memberDetails[msg.sender] > 0,"no share");
+
+        WETH9 weth9 = WETH9(weth);
+        uint wamt = weth9.balanceOf(address(this));
+        if(wamt > 0){
+            weth9.withdraw(wamt);
+        }
+
+        uint amt = memberDetails[msg.sender];
+        memberDetails[msg.sender] = 0;
+
+        payable(msg.sender).transfer(amt);
+
+        emit Divestment(msg.sender, amt);
     }
 
 
     /**
-     * @dev orders atomicMatch_ (buy now or Bid)
+     * @dev orders atomicMatch_ Buy Now
+     * addrs [0]:wyern [1]:maker [2]:taker [3]:feeRecipient [4]:target [5]:staticTarget [6]:paymentToken
+     * uints [0]:makerRelayerFee [1]:takerRelayerFee [2]:makerProtocolFee [3]:takerProtocolFee [4]:basePrice [5]:extra [6]:listingTime [7]:expirationTime [8]:salt 
+     * feeMethod Order feeMethod 0:ProtocolFee 1:SplitFee
+     * side Order side 1:sell 0:buy
+     * saleKind Order saleKind 0:FixedPrice 1:DutchAuction
+     * howToCall Order howToCall 0:Call 1:DelegateCall
+     * data Order calldata 
+     * replacementPattern Order replacementPattern
+     * staticExtradata Order staticExtradata
      */
     function exchange (
         address[14] memory addrs,
@@ -189,147 +236,107 @@ contract XmobExchagneCore is Initializable, OwnableUpgradeable, UUPSUpgradeable{
         bytes memory staticExtradataBuy,
         bytes memory staticExtradataSell,
         uint8[2] memory vs,
-        bytes32[5] memory rssMetadata,
-        bytes32 hash
+        bytes32[5] memory rssMetadata
        )
         public
         payable
         onlyOricle
-        returns(bytes32)
+        completed
     {
-        require(raisedTotal == amountTotal,"Not started");
-        require(keccak256(calldataBuy) == keccak256(callData),"Calldata  mismatch");
-        require(addrs[1] == address(this) || addrs[8] == address(this),"Maker not exists");
+        require(addrs[8] == address(this) || addrs[1] == address(this),"Maker not exists");
 
-        signatureHashs[hash] = true;
+        WETH9 weth9 = WETH9(weth);
+        uint256 amt =  weth9.balanceOf(address(this));
+        
+        if(amt > 0){
+            if(addrs[6] == address(0)){
+                weth9.withdraw(amt);
+            } else {
+                weth9.withdraw(fee);
+            }
+        }
         
         //buying
-        if(addrs[1] == address(this) && cost == 0){
-            payable(feeRecipient).transfer(fee);
+        if(addrs[1] == address(this) && cost == 0 && fee > 0){
+            payable(owner()).transfer(fee);
             cost = fee;
         }
 
-        wyvernExhcange.atomicMatch_{value:address(this).balance}(addrs,uints,feeMethodsSidesKindsHowToCalls,calldataBuy,calldataSell,replacementPatternBuy,replacementPatternSell,staticExtradataBuy,staticExtradataSell,vs,rssMetadata);
+        WyvernExchange(wyvernExhcangeCore).atomicMatch_{value:address(this).balance}(addrs,uints,feeMethodsSidesKindsHowToCalls,calldataBuy,calldataSell,replacementPatternBuy,replacementPatternSell,staticExtradataBuy,staticExtradataSell,vs,rssMetadata);
 
-        emit Exchanged(addrs[1], addrs[8], hash);
-
-        return hash;
+        emit Exchanged(addrs[1], addrs[8]);
     }
 
-  
-    /**
-     * @dev Signature authorization to bid or sell
-     * @param addrs [0]:wyern [1]:maker [2]:taker [3]:feeRecipient [4]:target [5]:staticTarget [6]:paymentToken
-     * @param uints [0]:makerRelayerFee [1]:takerRelayerFee [2]:makerProtocolFee [3]:takerProtocolFee [4]:basePrice [5]:extra [6]:listingTime [7]:expirationTime [8]:salt 
-     * @param feeMethod Order feeMethod 0:ProtocolFee 1:SplitFee
-     * @param side Order side 1:sell 0:buy
-     * @param saleKind Order saleKind 0:FixedPrice 1:DutchAuction
-     * @param howToCall Order howToCall 0:Call 1:DelegateCall
-     * @param data Order calldata 
-     * @param replacementPattern Order replacementPattern
-     * @param staticExtradata Order staticExtradata
-     */
-    function publish (
-        address[7] memory addrs,
-        uint[9] memory uints,
-        uint8 feeMethod,
-        uint8 side,
-        uint8 saleKind,
-        uint8 howToCall,
-        bytes memory data,
-        bytes memory replacementPattern,
-        bytes memory staticExtradata)
-        public
-        onlyOricle
-    {
-        require(raisedTotal == amountTotal,"Not started");
-        if(side == 0){
-            require(keccak256(data) == keccak256(callData),"Calldata  mismatch");
-        }
-
-        bytes32 hash = wyvernExhcange.hashToSign_(addrs, uints, feeMethod, side, saleKind, howToCall, data, replacementPattern, staticExtradata);
-        require(! signatureHashs[hash],"Already exists");
-
-        address WyvernProxy = wyvernProxyRegister.proxies(address(this));
-        if(WyvernProxy == address(0)){
-            WyvernProxy = wyvernProxyRegister.registerProxy();
-        }
-
-        NftCommon nft = NftCommon(token);
-        if(side == 1 && ! nft.isApprovedForAll(address(this), WyvernProxy)){
-            nft.setApprovalForAll(WyvernProxy,true);
-        }
-
-        // buy
-        if(side == 0){
-            uint amount = address(this).balance;
-            amount = amount > amountTotal ? amount : amountTotal;
-            amount = amount - fee;
-            if(amount > 0){
-                weth.deposit{value:amount}();
-                weth.approve(WyvernProxy, amount);
-            }   
-        }
-
-        signatureHashs[hash] = true;
-    }    
-
-
+    
     /** @dev Distribute profits */
-    function settlementAllocation(bool transferFee) public onlyOricle {
+    function settlementAllocation(bool transferFee) public onlyOricle{
 
-        require(! settlementState, "Settlement not completed");
-        settlementState = true;
+        WETH9 weth9 = WETH9(weth);
 
-        uint256 amt = weth.balanceOf(address(this));
+        uint256 amt = weth9.balanceOf(address(this));
         if(amt > 0){
-            weth.withdraw(amt);
+            weth9.withdraw(amt);
         }
+
         amt = address(this).balance;
         require(amt > 0,"Amt must gt 0");
 
-        if(transferFee && cost == 0){
-            payable(feeRecipient).transfer(fee);
+        if(transferFee && cost == 0 && fee > 0){
+            payable(owner()).transfer(fee);
             cost = fee;
             amt = address(this).balance;
         }
 
         for(uint i=0; i<members.length; i++){
             uint256 share = memberDetails[members[i]];
-            settlements[members[i]] = amt / amountTotal * share;
+            settlements[members[i]] = share / amountTotal;
         }
+
+        settlementState = true;
 
         emit Settlement(amt, block.timestamp);
     }
 
+
     /** @dev receive income  */
     function claim() public {
-
+        
         uint amt = settlements[msg.sender];
-        require(amt > 0, "Insufficient recoverable funds");
-        settlements[msg.sender] = 0;
+        if(amt > 0){
+            settlements[msg.sender] = 0;
 
-        payable(msg.sender).transfer(amt);
+            payable(msg.sender).transfer(amt);
 
-        emit Claim(msg.sender, amt);
-
-        bool state = true;
-        for(uint i=0; i<=members.length; i++){
-           if(settlements[members[i]] > 0){
-               state = false;
-           }
+            emit Claim(msg.sender, amt);
         }
-
+    
+        bool state = true;
+        for(uint i=0; i < members.length; i++){
+            if(settlements[members[i]] > 0){
+                state = false;
+            }
+        }
         if(state){
             settlementState = false;
         }
     }
 
-    function info() 
+    function mobItem() 
         public 
         view 
-        returns(uint, uint, uint, uint, uint)
+        returns(uint, uint, uint, uint, uint, uint)
     {
-        return (amountTotal, raisedTotal, takeProfitPrice, stopLossPrice, endTime);
+        return (amountTotal, raisedTotal, takeProfitPrice, stopLossPrice, deadline, raisedAmountDeadline);
+    }
+
+    function balanceAll()public view returns(uint,uint){
+        uint eth = address(this).balance;
+        uint wethbalance = WETH9(weth).balanceOf(address(this));
+        return (eth,wethbalance);
+    }
+
+    function oricles(address addr) public view returns (bool){
+        return XmobManage(owner()).oricles(addr);
     }
 }
+

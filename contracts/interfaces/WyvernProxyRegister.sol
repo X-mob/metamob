@@ -12,5 +12,5 @@ interface WyvernProxyRegister {
     /**
      *  /* Authenticated proxies by user.
      */
-    function proxies(address proxy) external returns(address);
+    function proxies(address proxy) external view returns(address);
 }
