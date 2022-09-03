@@ -7,25 +7,22 @@ interface WyvernExchange {
      */
     function hashToSign_(
         address[7] memory addrs,
-        uint[9] memory uints,
+        uint256[9] memory uints,
         uint8 feeMethod,
         uint8 side,
         uint8 saleKind,
         uint8 howToCall,
         bytes memory data,
         bytes memory replacementPattern,
-        bytes memory staticExtradata)
-        external
-        view
-        returns (bytes32);
+        bytes memory staticExtradata
+    ) external view returns (bytes32);
 
-    
     /**
      * @dev Call atomicMatch - Solidity ABI encoding limitation workaround, hopefully temporary.
      */
     function atomicMatch_(
         address[14] memory addrs,
-        uint[18] memory uints, 
+        uint256[18] memory uints,
         uint8[8] memory feeMethodsSidesKindsHowToCalls,
         bytes memory calldataBuy,
         bytes memory calldataSell,
@@ -34,8 +31,6 @@ interface WyvernExchange {
         bytes memory staticExtradataBuy,
         bytes memory staticExtradataSell,
         uint8[2] memory vs,
-        bytes32[5] memory rssMetadata)
-        external
-        payable;
-
+        bytes32[5] memory rssMetadata
+    ) external payable;
 }

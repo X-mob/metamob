@@ -3,12 +3,14 @@ pragma solidity ^0.8.0;
 
 interface NftCommon {
     /**
-     * isApprovedForAll 
+     * isApprovedForAll
      */
-    function isApprovedForAll(address account, address operator) external returns(bool);
+    function isApprovedForAll(address account, address operator)
+        external
+        returns (bool);
 
     /**
-     * setApprovalForAll 
+     * setApprovalForAll
      */
     function setApprovalForAll(address operator, bool approved) external;
 }

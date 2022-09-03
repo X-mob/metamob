@@ -1,4 +1,16 @@
 node_modules
-contracts/.deps
-contracts/artifacts
-contracts/interfaces/artifacts
+.env
+
+coverage
+coverage.json
+
+typechain
+typechain-types
+
+#Hardhat files
+cache
+artifacts
+
+.DS_Store
+
+.vscode
