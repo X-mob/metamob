@@ -21,28 +21,18 @@ contract XmobExchangeCore is
 {
     using SafeMath for uint256;
 
-    string public constant version = "1.0.0";
+    string public constant VERSION = "1.0.0";
 
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
     bytes4 internal constant MAGICVALUE = 0x1626ba7e;
 
-    /** @dev Wyvern Token transfer Opensea   */
-    address constant wyvernTokenTransferProxy =
-        0xCdC9188485316BF6FA416d02B4F680227c50b89e;
-
-    /** @dev WyvernExchange Opensea core  */
-    address constant wyvernExhcangeCore =
-        0xdD54D660178B28f6033a953b0E55073cFA7e3744;
-
-    /** @dev WyvernProxyRegister Opensea proxy  */
-    address constant wyvernProxyRegister =
-        0x1E525EEAF261cA41b809884CBDE9DD9E1619573A;
-
     /** @dev seaport Opensea proxy  */
-    address constant seaportCore = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
+    address public constant SEAPORT_CORE =
+        0x00000000006c3852cbEf3e08E8dF289169EdE581;
 
     /** @dev WETH ERC20 */
-    address constant weth = 0xc778417E063141139Fce010982780140Aa0cD5Ab;
+    address public constant WETH_ADDR =
+        0xc778417E063141139Fce010982780140Aa0cD5Ab;
 
     /** @dev Fee Account */
     address public creator;
@@ -125,7 +115,7 @@ contract XmobExchangeCore is
         }
 
         // Approve All Token Nft-Id For SeaportCore contract
-        NftCommon(_token).setApprovalForAll(seaportCore, true);
+        NftCommon(_token).setApprovalForAll(SEAPORT_CORE, true);
 
         // Approve Weth for openseaCore contract
         //WETH9(weth).approve(seaportCore, raisedTotal);
@@ -139,7 +129,10 @@ contract XmobExchangeCore is
         view
         override
     {
-        require(newImplementation != address(0) && msg.sender == owner());
+        require(
+            newImplementation != address(0) && msg.sender == owner(),
+            "auth upgrade failed"
+        );
     }
 
     /** TODO
@@ -190,7 +183,7 @@ contract XmobExchangeCore is
         amountTotal += amt;
 
         //swap to WETH
-        WETH9(weth).deposit{value: amt}();
+        WETH9(WETH_ADDR).deposit{value: amt}();
 
         emit MemberJoin(addr, amt);
     }
@@ -200,7 +193,7 @@ contract XmobExchangeCore is
         require(block.timestamp > raisedAmountDeadline, "fund raising");
         require(memberDetails[msg.sender] > 0, "no share");
 
-        WETH9 weth9 = WETH9(weth);
+        WETH9 weth9 = WETH9(WETH_ADDR);
         uint256 wamt = weth9.balanceOf(address(this));
         if (wamt > 0) {
             weth9.withdraw(wamt);
@@ -214,77 +207,11 @@ contract XmobExchangeCore is
         emit Divestment(msg.sender, amt);
     }
 
-    /**
-     * @dev orders atomicMatch_ Buy Now
-     * addrs [0]:wyern [1]:maker [2]:taker [3]:feeRecipient [4]:target [5]:staticTarget [6]:paymentToken
-     * uints [0]:makerRelayerFee [1]:takerRelayerFee [2]:makerProtocolFee [3]:takerProtocolFee [4]:basePrice [5]:extra [6]:listingTime [7]:expirationTime [8]:salt
-     * feeMethod Order feeMethod 0:ProtocolFee 1:SplitFee
-     * side Order side 1:sell 0:buy
-     * saleKind Order saleKind 0:FixedPrice 1:DutchAuction
-     * howToCall Order howToCall 0:Call 1:DelegateCall
-     * data Order calldata
-     * replacementPattern Order replacementPattern
-     * staticExtradata Order staticExtradata
-     */
-    function exchange(
-        address[14] memory addrs,
-        uint256[18] memory uints,
-        uint8[8] memory feeMethodsSidesKindsHowToCalls,
-        bytes memory calldataBuy,
-        bytes memory calldataSell,
-        bytes memory replacementPatternBuy,
-        bytes memory replacementPatternSell,
-        bytes memory staticExtradataBuy,
-        bytes memory staticExtradataSell,
-        uint8[2] memory vs,
-        bytes32[5] memory rssMetadata
-    ) public payable onlyOracle completed {
-        require(
-            addrs[8] == address(this) || addrs[1] == address(this),
-            "Maker not exists"
-        );
-
-        WETH9 weth9 = WETH9(weth);
-        uint256 amt = weth9.balanceOf(address(this));
-
-        if (amt > 0) {
-            if (addrs[6] == address(0)) {
-                // payment token is eth
-                weth9.withdraw(amt);
-            } else {
-                weth9.withdraw(fee);
-            }
-        }
-
-        //buying
-        if (addrs[1] == address(this) && cost == 0 && fee > 0) {
-            payable(owner()).transfer(fee);
-            cost = fee;
-        }
-
-        WyvernExchange(wyvernExhcangeCore).atomicMatch_{
-            value: address(this).balance
-        }(
-            addrs,
-            uints,
-            feeMethodsSidesKindsHowToCalls,
-            calldataBuy,
-            calldataSell,
-            replacementPatternBuy,
-            replacementPatternSell,
-            staticExtradataBuy,
-            staticExtradataSell,
-            vs,
-            rssMetadata
-        );
-
-        emit Exchanged(addrs[1], addrs[8]);
-    }
-
     // simple eth_to_erc721 buying
     function buyNow(BasicOrderParameters calldata parameters)
         external
         payable
+        completed
         returns (bool isFulFilled)
     {
         require(
@@ -298,7 +225,7 @@ contract XmobExchangeCore is
         );
 
         // convert weth to eth for buying since it is eth_to_erc721 type
-        WETH9 weth9 = WETH9(weth);
+        WETH9 weth9 = WETH9(WETH_ADDR);
         uint256 amt = weth9.balanceOf(address(this));
         if (amt > 0) {
             weth9.withdraw(amt);
@@ -306,11 +233,11 @@ contract XmobExchangeCore is
 
         // let admin take manage fee
         if (cost == 0 && fee > 0) {
-            payable(owner()).transfer(fee);
             cost = fee;
+            payable(owner()).transfer(fee);
         }
 
-        bool isSuccess = SeaportInterface(seaportCore).fulfillBasicOrder{
+        bool isSuccess = SeaportInterface(SEAPORT_CORE).fulfillBasicOrder{
             value: address(this).balance
         }(parameters);
 
@@ -323,7 +250,7 @@ contract XmobExchangeCore is
 
     /** @dev Distribute profits */
     function settlementAllocation(bool transferFee) public onlyOracle {
-        WETH9 weth9 = WETH9(weth);
+        WETH9 weth9 = WETH9(WETH_ADDR);
 
         uint256 amt = weth9.balanceOf(address(this));
         if (amt > 0) {
@@ -333,18 +260,18 @@ contract XmobExchangeCore is
         amt = address(this).balance;
         require(amt > 0, "Amt must gt 0");
 
-        if (transferFee && cost == 0 && fee > 0) {
-            payable(owner()).transfer(fee);
-            cost = fee;
-            amt = address(this).balance;
-        }
+        settlementState = true;
 
         for (uint256 i = 0; i < members.length; i++) {
             uint256 share = memberDetails[members[i]];
             settlements[members[i]] = share / amountTotal;
         }
 
-        settlementState = true;
+        if (transferFee && cost == 0 && fee > 0) {
+            cost = fee;
+            amt = address(this).balance;
+            payable(owner()).transfer(fee);
+        }
 
         emit Settlement(amt, block.timestamp);
     }
@@ -354,9 +281,6 @@ contract XmobExchangeCore is
         uint256 amt = settlements[msg.sender];
         if (amt > 0) {
             settlements[msg.sender] = 0;
-
-            payable(msg.sender).transfer(amt);
-
             emit Claim(msg.sender, amt);
         }
 
@@ -368,6 +292,10 @@ contract XmobExchangeCore is
         }
         if (state) {
             settlementState = false;
+        }
+
+        if (amt > 0) {
+            payable(msg.sender).transfer(amt);
         }
     }
 
@@ -395,7 +323,7 @@ contract XmobExchangeCore is
 
     function balanceAll() public view returns (uint256, uint256) {
         uint256 eth = address(this).balance;
-        uint256 wethbalance = WETH9(weth).balanceOf(address(this));
+        uint256 wethbalance = WETH9(WETH_ADDR).balanceOf(address(this));
         return (eth, wethbalance);
     }
 

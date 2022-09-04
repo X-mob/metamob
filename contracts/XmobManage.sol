@@ -170,14 +170,14 @@ contract XmobManage is Ownable {
 
     /** @dev set fee */
     function setFee(uint8 _feeRate) public onlyOwner {
-        require(_feeRate < 1000);
+        require(_feeRate < 1000, "feeRate gt 1000");
         feeRate = _feeRate;
         emit FeeSet(feeRate);
     }
 
     /** @dev XmobExchang manager */
     function setOracle(address oracle, bool state) public onlyOwner {
-        require(oracles[oracle] != state);
+        require(oracles[oracle] != state, "already set");
 
         oracles[oracle] = state;
 
@@ -195,7 +195,7 @@ contract XmobManage is Ownable {
         assembly {
             size := extcodesize(_exchangeCore)
         }
-        require(size > 0);
+        require(size > 0, "not contract");
 
         exchangeCore = _exchangeCore;
         emit ProxySet(_exchangeCore);
@@ -205,22 +205,5 @@ contract XmobManage is Ownable {
     function withdraw(address addr, uint256 amt) public onlyOwner {
         payable(addr).transfer(amt);
         emit Withdraw(addr, amt);
-    }
-
-    /** @dev target call  */
-    function excute(
-        address[] memory addrs,
-        uint256[] memory amts,
-        bytes[] memory datas
-    ) public onlyOwner {
-        require(addrs.length == datas.length && amts.length == addrs.length);
-
-        for (uint256 i = 0; i < addrs.length; i++) {
-            (bool success, bytes memory result) = address(addrs[i]).call(
-                datas[i]
-            );
-            require(success);
-            emit Excuted(addrs[i], amts[i], datas[i], result);
-        }
     }
 }
