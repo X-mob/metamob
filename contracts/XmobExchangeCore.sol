@@ -11,12 +11,10 @@ import "./interfaces/NftCommon.sol";
 import "./interfaces/Weth9.sol";
 import "./interfaces/WyvernProxyRegister.sol";
 import "./interfaces/WyvernExchange.sol";
+import "./interfaces/Seaport.sol";
+import "./interfaces/XmobManageInterface.sol";
 
-interface XmobManage {
-    function oricles(address addr) external view returns (bool);
-}
-
-contract XmobExchagneCore is
+contract XmobExchangeCore is
     Initializable,
     OwnableUpgradeable,
     UUPSUpgradeable
@@ -40,11 +38,14 @@ contract XmobExchagneCore is
     address constant wyvernProxyRegister =
         0x1E525EEAF261cA41b809884CBDE9DD9E1619573A;
 
+    /** @dev seaport Opensea proxy  */
+    address constant seaportCore = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
+
     /** @dev WETH ERC20 */
     address constant weth = 0xc778417E063141139Fce010982780140Aa0cD5Ab;
 
     /** @dev Fee Account */
-    address public creater;
+    address public creator;
     address public token;
     uint256 public amountTotal;
     uint256 public raisedTotal;
@@ -74,7 +75,10 @@ contract XmobExchagneCore is
      * @notice Oracle authority check
      */
     modifier onlyOricle() {
-        require(XmobManage(owner()).oricles(msg.sender), "Unauthorized");
+        require(
+            XmobManageInterface(owner()).oricles(msg.sender),
+            "Unauthorized"
+        );
 
         _;
     }
@@ -89,13 +93,13 @@ contract XmobExchagneCore is
     constructor() initializer {}
 
     function initialize(
-        address _creater,
+        address _creator,
         address _token,
         uint256 _fee,
         uint256 _raisedTotal,
         uint256 _takeProfitPrice,
         uint256 _stopLossPrice,
-        uint256 _rasiedAmountDeadline,
+        uint256 _raisedAmountDeadline,
         uint256 _deadline,
         string memory _mobName
     ) public payable initializer {
@@ -103,37 +107,28 @@ contract XmobExchagneCore is
         __UUPSUpgradeable_init();
 
         require(_fee < _raisedTotal, "Fee error");
-        require(_deadline > _rasiedAmountDeadline, "Deadline error");
-        require(_rasiedAmountDeadline > block.timestamp, "EndTime gt now");
+        require(_deadline > _raisedAmountDeadline, "Deadline error");
+        require(_raisedAmountDeadline > block.timestamp, "EndTime gt now");
 
-        creater = _creater;
+        creator = _creator;
         token = _token;
         fee = _fee;
         raisedTotal = _raisedTotal;
         takeProfitPrice = _takeProfitPrice;
         stopLossPrice = _stopLossPrice;
         deadline = _deadline;
-        raisedAmountDeadline = _rasiedAmountDeadline;
+        raisedAmountDeadline = _raisedAmountDeadline;
         mobName = _mobName;
 
         if (msg.value > 0) {
-            memberDeposit(_creater, msg.value);
+            memberDeposit(_creator, msg.value);
         }
 
-        // regisger Opensea proxy
-        WyvernProxyRegister wyvernProxy = WyvernProxyRegister(
-            wyvernProxyRegister
-        );
-        wyvernProxy.registerProxy();
-
-        //Approve All Token Nft-Id For Opensea proxy
-        NftCommon(_token).setApprovalForAll(
-            wyvernProxy.proxies(address(this)),
-            true
-        );
+        //Approve All Token Nft-Id For SeaportCore contract
+        NftCommon(_token).setApprovalForAll(seaportCore, true);
 
         //Approve Weth for opensea wyvernTokenTransferProxy
-        WETH9(weth).approve(wyvernTokenTransferProxy, raisedTotal);
+        //WETH9(weth).approve(wyvernTokenTransferProxy, raisedTotal);
     }
 
     /**
@@ -157,7 +152,11 @@ contract XmobExchagneCore is
     {
         //TODO ECDSA ECDSA.recover(hash, v, r, s);
 
-        if (XmobManage(owner()).oricles(ECDSA.recover(_hash, _signature))) {
+        if (
+            XmobManageInterface(owner()).oricles(
+                ECDSA.recover(_hash, _signature)
+            )
+        ) {
             return MAGICVALUE;
         }
         return 0x1726ba12;
@@ -281,6 +280,27 @@ contract XmobExchagneCore is
         emit Exchanged(addrs[1], addrs[8]);
     }
 
+    function buyNow(BasicOrderParameters calldata parameters)
+        external
+        payable
+        returns (bool isFulFilled)
+    {
+        require(
+            parameters.basicOrderType == BasicOrderType.ETH_TO_ERC721_FULL_OPEN,
+            "wrong order type"
+        );
+        require(parameters.offerToken == token, "buying wrong token");
+        require(
+            parameters.fulfillerConduitKey == bytes32(0),
+            "fulfillerConduitKey must be zero"
+        );
+
+        return
+            Seaport(seaportCore).fulfillBasicOrder{
+                value: address(this).balance
+            }(parameters);
+    }
+
     /** @dev Distribute profits */
     function settlementAllocation(bool transferFee) public onlyOricle {
         WETH9 weth9 = WETH9(weth);
@@ -360,6 +380,6 @@ contract XmobExchagneCore is
     }
 
     function oricles(address addr) public view returns (bool) {
-        return XmobManage(owner()).oricles(addr);
+        return XmobManageInterface(owner()).oricles(addr);
     }
 }

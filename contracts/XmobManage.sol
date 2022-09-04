@@ -7,7 +7,7 @@ import "./XmobExchangeProxy.sol";
 
 import "./interfaces/XmobExchangeCoreInterface.sol";
 
-contract XmobMange is Ownable {
+contract XmobManage is Ownable {
     address public exchangeProxy;
 
     uint8 public feeRate; //1000/1000
@@ -24,7 +24,7 @@ contract XmobMange is Ownable {
         uint256 rasiedAmountDeadline;
         uint256 deadline;
         uint256 fee;
-        address creater;
+        address creator;
         string name;
     }
 
@@ -39,7 +39,7 @@ contract XmobMange is Ownable {
     event SetOricle(address indexed admin, bool state);
     event FeeSet(uint8 feeRate);
     event MobCreate(
-        address indexed creater,
+        address indexed creator,
         address indexed token,
         uint256 indexed tokenId,
         address proxy,
@@ -119,7 +119,7 @@ contract XmobMange is Ownable {
         mobsById[mobsTotal] = address(mob);
 
         Mob storage mobInfo = mobs[address(mob)];
-        mobInfo.creater = msg.sender;
+        mobInfo.creator = msg.sender;
         mobInfo.raisedTotal = _raisedTotal;
         mobInfo.name = _mobName;
         mobInfo.rasiedAmountDeadline = _rasiedAmountDeadline;
@@ -127,7 +127,7 @@ contract XmobMange is Ownable {
         mobInfo.fee = fee;
 
         emit MobCreate(
-            mobInfo.creater,
+            mobInfo.creator,
             _token,
             _tokenId,
             address(mob),
@@ -152,7 +152,7 @@ contract XmobMange is Ownable {
         require(msg.value > 0, "ETH gt 0");
 
         Mob storage mobInfo = mobs[mob];
-        require(mobInfo.creater != address(0), "Mob not exists");
+        require(mobInfo.creator != address(0), "Mob not exists");
         require(mobInfo.deadline > block.timestamp, "Mob Expired");
 
         XmobExchangeCoreInterface mobCore = XmobExchangeCoreInterface(mob);
