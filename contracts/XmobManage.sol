@@ -28,7 +28,7 @@ contract XmobManage is Ownable {
         string name;
     }
 
-    event SetProxy(address proxy);
+    event ProxySet(address proxy);
     event Excuted(
         address indexed target,
         uint256 amt,
@@ -36,7 +36,7 @@ contract XmobManage is Ownable {
         bytes result
     );
     event Withdraw(address addr, uint256 amt);
-    event SetOracle(address indexed admin, bool state);
+    event OracleSet(address indexed admin, bool state);
     event FeeSet(uint8 feeRate);
     event MobCreate(
         address indexed creator,
@@ -180,7 +180,7 @@ contract XmobManage is Ownable {
 
         oracles[oracle] = state;
 
-        emit SetOracle(oracle, state);
+        emit OracleSet(oracle, state);
     }
 
     /** @dev exchange core proxy  */
@@ -197,7 +197,7 @@ contract XmobManage is Ownable {
         require(size > 0);
 
         exchangeProxy = proxy;
-        emit SetProxy(proxy);
+        emit ProxySet(proxy);
     }
 
     /** @dev Administrator withdraws management fee  */
