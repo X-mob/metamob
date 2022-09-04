@@ -17,7 +17,7 @@ contract XmobManage is Ownable {
     mapping(address => Mob) public mobs;
     mapping(uint256 => address) public mobsById;
 
-    mapping(address => bool) public oricles;
+    mapping(address => bool) public oracles;
 
     struct Mob {
         uint256 raisedTotal;
@@ -36,7 +36,7 @@ contract XmobManage is Ownable {
         bytes result
     );
     event Withdraw(address addr, uint256 amt);
-    event SetOricle(address indexed admin, bool state);
+    event SetOracle(address indexed admin, bool state);
     event FeeSet(uint8 feeRate);
     event MobCreate(
         address indexed creator,
@@ -175,12 +175,12 @@ contract XmobManage is Ownable {
     }
 
     /** @dev XmobExchang manager */
-    function setOricle(address oricle, bool state) public onlyOwner {
-        require(oricles[oricle] != state);
+    function setOracle(address oracle, bool state) public onlyOwner {
+        require(oracles[oracle] != state);
 
-        oricles[oricle] = state;
+        oracles[oracle] = state;
 
-        emit SetOricle(oricle, state);
+        emit SetOracle(oracle, state);
     }
 
     /** @dev exchange core proxy  */

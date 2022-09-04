@@ -74,9 +74,9 @@ contract XmobExchangeCore is
     /**
      * @notice Oracle authority check
      */
-    modifier onlyOricle() {
+    modifier onlyOracle() {
         require(
-            XmobManageInterface(owner()).oricles(msg.sender),
+            XmobManageInterface(owner()).oracles(msg.sender),
             "Unauthorized"
         );
 
@@ -153,7 +153,7 @@ contract XmobExchangeCore is
         //TODO ECDSA ECDSA.recover(hash, v, r, s);
 
         if (
-            XmobManageInterface(owner()).oricles(
+            XmobManageInterface(owner()).oracles(
                 ECDSA.recover(_hash, _signature)
             )
         ) {
@@ -238,7 +238,7 @@ contract XmobExchangeCore is
         bytes memory staticExtradataSell,
         uint8[2] memory vs,
         bytes32[5] memory rssMetadata
-    ) public payable onlyOricle completed {
+    ) public payable onlyOracle completed {
         require(
             addrs[8] == address(this) || addrs[1] == address(this),
             "Maker not exists"
@@ -296,13 +296,13 @@ contract XmobExchangeCore is
         );
 
         return
-            Seaport(seaportCore).fulfillBasicOrder{
+            SeaportInterface(seaportCore).fulfillBasicOrder{
                 value: address(this).balance
             }(parameters);
     }
 
     /** @dev Distribute profits */
-    function settlementAllocation(bool transferFee) public onlyOricle {
+    function settlementAllocation(bool transferFee) public onlyOracle {
         WETH9 weth9 = WETH9(weth);
 
         uint256 amt = weth9.balanceOf(address(this));
@@ -379,7 +379,7 @@ contract XmobExchangeCore is
         return (eth, wethbalance);
     }
 
-    function oricles(address addr) public view returns (bool) {
-        return XmobManageInterface(owner()).oricles(addr);
+    function oracles(address addr) public view returns (bool) {
+        return XmobManageInterface(owner()).oracles(addr);
     }
 }
