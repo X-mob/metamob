@@ -8,7 +8,8 @@ import "./XmobExchangeProxy.sol";
 import "./interfaces/XmobExchangeCoreInterface.sol";
 
 contract XmobManage is Ownable {
-    address public exchangeProxy;
+    // initial exchangeCore contract address
+    address public exchangeCore;
 
     uint8 public feeRate; //1000/1000
 
@@ -54,8 +55,8 @@ contract XmobManage is Ownable {
     event MobDeposit(address indexed mob, address indexed sender, uint256 amt);
     event DepositEth(address sender, uint256 amt);
 
-    constructor(address proxy) {
-        setProxy(proxy);
+    constructor(address _exchangeCore) {
+        setProxy(_exchangeCore);
     }
 
     receive() external payable {
@@ -93,7 +94,7 @@ contract XmobManage is Ownable {
         uint256 fee = (_raisedTotal * feeRate) / 1000;
 
         XmobExchangeProxy mob = new XmobExchangeProxy{value: msg.value}(
-            exchangeProxy,
+            exchangeCore,
             abi.encodeWithSelector(
                 bytes4(
                     keccak256(
@@ -184,20 +185,20 @@ contract XmobManage is Ownable {
     }
 
     /** @dev exchange core proxy  */
-    function _setProxy(address proxy) public onlyOwner {
-        setProxy(proxy);
+    function _setProxy(address _exchangeCore) public onlyOwner {
+        setProxy(_exchangeCore);
     }
 
     /** @dev set core proxy  */
-    function setProxy(address proxy) internal {
+    function setProxy(address _exchangeCore) internal {
         uint256 size;
         assembly {
-            size := extcodesize(proxy)
+            size := extcodesize(_exchangeCore)
         }
         require(size > 0);
 
-        exchangeProxy = proxy;
-        emit ProxySet(proxy);
+        exchangeCore = _exchangeCore;
+        emit ProxySet(_exchangeCore);
     }
 
     /** @dev Administrator withdraws management fee  */

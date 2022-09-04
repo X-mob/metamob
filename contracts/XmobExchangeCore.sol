@@ -124,11 +124,11 @@ contract XmobExchangeCore is
             memberDeposit(_creator, msg.value);
         }
 
-        //Approve All Token Nft-Id For SeaportCore contract
+        // Approve All Token Nft-Id For SeaportCore contract
         NftCommon(_token).setApprovalForAll(seaportCore, true);
 
-        //Approve Weth for opensea wyvernTokenTransferProxy
-        //WETH9(weth).approve(wyvernTokenTransferProxy, raisedTotal);
+        // Approve Weth for openseaCore contract
+        //WETH9(weth).approve(seaportCore, raisedTotal);
     }
 
     /**
@@ -249,6 +249,7 @@ contract XmobExchangeCore is
 
         if (amt > 0) {
             if (addrs[6] == address(0)) {
+                // payment token is eth
                 weth9.withdraw(amt);
             } else {
                 weth9.withdraw(fee);
@@ -280,6 +281,7 @@ contract XmobExchangeCore is
         emit Exchanged(addrs[1], addrs[8]);
     }
 
+    // simple eth_to_erc721 buying
     function buyNow(BasicOrderParameters calldata parameters)
         external
         payable
@@ -295,10 +297,28 @@ contract XmobExchangeCore is
             "fulfillerConduitKey must be zero"
         );
 
-        return
-            SeaportInterface(seaportCore).fulfillBasicOrder{
-                value: address(this).balance
-            }(parameters);
+        // convert weth to eth for buying since it is eth_to_erc721 type
+        WETH9 weth9 = WETH9(weth);
+        uint256 amt = weth9.balanceOf(address(this));
+        if (amt > 0) {
+            weth9.withdraw(amt);
+        }
+
+        // let admin take manage fee
+        if (cost == 0 && fee > 0) {
+            payable(owner()).transfer(fee);
+            cost = fee;
+        }
+
+        bool isSuccess = SeaportInterface(seaportCore).fulfillBasicOrder{
+            value: address(this).balance
+        }(parameters);
+
+        if (isSuccess) {
+            emit Exchanged(address(this), parameters.offerer);
+        }
+
+        return isSuccess;
     }
 
     /** @dev Distribute profits */
