@@ -7,7 +7,7 @@ describe("XmobExchangeCore", function () {
     const exchangeCore = await ExchangeCore.deploy();
     await exchangeCore.deployed();
 
-    expect(await exchangeCore.version()).to.equal("1.0.0");
+    expect(await exchangeCore.VERSION()).to.equal("1.0.0");
   });
 
   it("Should failed at initializing XmobExchangeCore directly", async function () {
