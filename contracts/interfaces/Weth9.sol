@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-interface WETH9 {
+interface WETH9Interface {
     /** ETH swap to WETH */
     function deposit() external payable;
 
