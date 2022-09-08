@@ -1,5 +1,7 @@
 ![](./docs/resource/xmob.png)
 
+🚧 We are working on migrating to OpenSea new protocol [Seaport](https://github.com/ProjectOpenSea/seaport), for old version Contracts aiming at Wyvern protocol Opensea, please checkout [wyvern-opensea](https://github.com/X-mob/metamob/tree/wyvern-opensea) branch.
+
 # Buy and Sell NFTs with your friends
 It is easy to BUY something with your friends，but sucks in selling it.
 X-mob bring a new way to buy and sell nfts smooth.
@@ -35,8 +37,7 @@ X-mob bring a new way to buy and sell nfts smooth.
 - The investment DAOs governed by multi-signature wallets have low efficiency in investing and selling, such DAOs whose members are more than 20 people virtually use the traditional VC's general partner model to tackle the problem.
 - X-Mob avoids a circumstance where the assets are locked in the contract because the members disagree with the terms of NFT selling due to the governance introduced to the current fragmentation scheme.
 
-# Deployment
-* `npm run deploy` 
-
+# Compile Contracts
+* `yarn && yarn build`
 # Running tests
-* `npm run test`
+* `yarn run test`
