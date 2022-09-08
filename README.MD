@@ -1,4 +1,4 @@
-![](./xmob.png)
+![](./docs/resource/xmob.png)
 
 # Buy and Sell NFTs with your friends
 It is easy to BUY something with your friends，but sucks in selling it.

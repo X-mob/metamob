@@ -1,10 +1,15 @@
 {
-  "name": "metamob",
+  "name": "metamob-contract-v2",
   "version": "1.0.0",
-  "description": "",
+  "description": "metamob smart contracts",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "clean": "hardhat clean",
+    "fmt": "prettier --write \"scripts/*\" \"test/*\" \"contracts/*.sol\" \"contracts/**/*.sol\" \"*.js\" \"*.json\" \"*.ts\"",
+    "lint": "eslint -c ./.eslintrc.js \"test/*\" \"scripts/*\" && solhint contracts/*.sol contracts/**/*.sol",
+    "build": "hardhat compile",
+    "test": "hardhat test",
+    "coverage": "hardhat coverage --solcoverjs ./.solcover.js"
   },
   "keywords": [],
   "author": "",
@@ -12,9 +17,32 @@
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.0.6",
     "@nomiclabs/hardhat-waffle": "^2.0.3",
+    "@openzeppelin/contracts": "^4.7.3",
+    "@openzeppelin/contracts-upgradeable": "^4.7.3",
+    "@typechain/ethers-v5": "^10.1.0",
+    "@typechain/hardhat": "^6.1.2",
+    "@types/mocha": "^9.1.1",
+    "@typescript-eslint/eslint-plugin": "^5.36.1",
+    "@typescript-eslint/parser": "^5.36.1",
     "chai": "^4.3.6",
+    "dotenv": "^16.0.2",
+    "eslint": "^8.23.0",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-config-standard": "^16.0.3",
+    "eslint-plugin-import": "^2.23.4",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prettier": "^3.4.0",
+    "eslint-plugin-promise": "^5.1.0",
     "ethereum-waffle": "^3.4.4",
     "ethers": "^5.6.7",
-    "hardhat": "^2.9.6"
+    "hardhat": "2.10.2",
+    "hardhat-gas-reporter": "^1.0.8",
+    "prettier": "^2.7.1",
+    "prettier-plugin-solidity": "^1.0.0-beta.24",
+    "solhint": "^3.3.7",
+    "solidity-coverage": "^0.7.16",
+    "ts-node": "^10.9.1",
+    "typechain": "^8.1.0",
+    "typescript": "^4.8.2"
   }
 }
