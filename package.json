@@ -4,6 +4,7 @@
   "description": "metamob smart contracts",
   "main": "index.js",
   "scripts": {
+    "deps": "yarn ts-node scripts/deps.ts",
     "clean": "hardhat clean",
     "fmt": "prettier --write \"scripts/*\" \"test/*\" \"contracts/*.sol\" \"contracts/**/*.sol\" \"*.js\" \"*.json\" \"*.ts\"",
     "lint": "eslint -c ./.eslintrc.js \"test/*\" \"scripts/*\" && solhint contracts/*.sol contracts/**/*.sol",
@@ -25,6 +26,7 @@
     "@typescript-eslint/eslint-plugin": "^5.36.1",
     "@typescript-eslint/parser": "^5.36.1",
     "chai": "^4.3.6",
+    "child_process": "^1.0.2",
     "dotenv": "^16.0.2",
     "eslint": "^8.23.0",
     "eslint-config-prettier": "^8.3.0",
