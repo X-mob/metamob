@@ -26,7 +26,43 @@ const config: HardhatUserConfig = {
       {
         version: "0.4.22",
       },
+
+      // taken from https://github.com/ProjectOpenSea/seaport/blob/1.1/hardhat.config.ts#L29
+      {
+        version: "0.8.14",
+        settings: {
+          viaIR: true,
+          optimizer: {
+            enabled: true,
+            runs: 19066,
+          },
+        },
+      },
     ],
+
+    // taken from https://github.com/ProjectOpenSea/seaport/blob/1.1/hardhat.config.ts#L39
+    overrides: {
+      "contracts/deps/seaport/conduit/Conduit.sol": {
+        version: "0.8.14",
+        settings: {
+          viaIR: true,
+          optimizer: {
+            enabled: true,
+            runs: 1000000,
+          },
+        },
+      },
+      "contracts/deps/seaport/conduit/ConduitController.sol": {
+        version: "0.8.14",
+        settings: {
+          viaIR: true,
+          optimizer: {
+            enabled: true,
+            runs: 1000000,
+          },
+        },
+      },
+    },
   },
   networks: {
     hardhat: {},

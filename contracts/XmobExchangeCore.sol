@@ -26,9 +26,11 @@ contract XmobExchangeCore is
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
     bytes4 internal constant MAGICVALUE = 0x1626ba7e;
 
+    bytes internal constant MAGIC_SIGNATURE = "0x42";
+
     /** @dev seaport Opensea proxy  */
-    address public constant SEAPORT_CORE =
-        0x00000000006c3852cbEf3e08E8dF289169EdE581;
+    //todo: change to const for production
+    address public SEAPORT_CORE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
 
     /** @dev WETH ERC20 */
     //todo: change to const for production
@@ -53,6 +55,8 @@ contract XmobExchangeCore is
     mapping(address => uint256) public memberDetails;
 
     mapping(address => uint256) public settlements;
+
+    mapping(bytes32 => bool) public registerOrderHash;
 
     event MemberJoin(address member, uint256 value);
     event Exchanged(address indexed buyer, address indexed seller);
@@ -136,26 +140,6 @@ contract XmobExchangeCore is
             newImplementation != address(0) && msg.sender == owner(),
             "auth upgrade failed"
         );
-    }
-
-    /** TODO
-     * @notice Verifies that the signer is the owner of the signing contract.
-     */
-    function isValidSignature(bytes32 _hash, bytes calldata _signature)
-        external
-        view
-        returns (bytes4)
-    {
-        //TODO ECDSA ECDSA.recover(hash, v, r, s);
-
-        if (
-            XmobManageInterface(owner()).oracles(
-                ECDSA.recover(_hash, _signature)
-            )
-        ) {
-            return MAGICVALUE;
-        }
-        return 0x1726ba12;
     }
 
     //weth swap
@@ -252,8 +236,172 @@ contract XmobExchangeCore is
         return isSuccess;
     }
 
+    // submit sell orders on chain
+    // only the offerer require no signature
+    function validateSellOrders(Order[] calldata orders)
+        external
+        returns (bool isValidated)
+    {
+        _verifySellOrders(orders);
+
+        // submit order ot seaport
+        return SeaportInterface(SEAPORT_CORE).validate(orders);
+    }
+
+    function _verifySellOrders(Order[] calldata orders) internal view {
+        // Skip overflow check as for loop is indexed starting at zero.
+        unchecked {
+            // Read length of the orders array from memory and place on stack.
+            uint256 totalOrders = orders.length;
+
+            // Iterate over each order.
+            for (uint256 i = 0; i < totalOrders; ) {
+                // Retrieve the order.
+                Order calldata order = orders[i];
+                // Retrieve the order parameters.
+                OrderParameters calldata orderParameters = order.parameters;
+
+                // check order parameters
+                require(
+                    orderParameters.offerer == address(this),
+                    "wrong offerer"
+                );
+                require(orderParameters.zone == address(0), "zone != 0");
+                require(
+                    orderParameters.zoneHash == bytes32(0),
+                    "zoneHash != 0"
+                );
+                require(orderParameters.offer.length == 1, "offer length !=1");
+                require(
+                    orderParameters.consideration.length == 1,
+                    "consideration length !=1"
+                );
+                require(
+                    orderParameters.orderType == OrderType.FULL_OPEN,
+                    "wrong orderType"
+                );
+                require(
+                    orderParameters.conduitKey == bytes32(0),
+                    "conduitKey != 0"
+                );
+                require(
+                    orderParameters.totalOriginalConsiderationItems ==
+                        uint256(1),
+                    "OriginalConsider != 1"
+                );
+
+                _verifyOfferItem(orderParameters.offer[0]);
+                _verifyConsiderationItem(orderParameters.consideration[0]);
+
+                // Increment counter inside body of the loop for gas efficiency.
+                ++i;
+            }
+        }
+    }
+
+    function _verifyOfferItem(OfferItem calldata offer) internal view {
+        require(offer.itemType == ItemType.ERC721, "wrong offer.ItemType");
+        require(offer.token == token, "wrong offer.token");
+        require(offer.startAmount == 1, "wrong offer.startAmount");
+        require(offer.endAmount == 1, "wrong offer.endAmount");
+    }
+
+    // only accept ether
+    function _verifyConsiderationItem(ConsiderationItem calldata consider)
+        internal
+        view
+    {
+        require(
+            consider.itemType == ItemType.NATIVE,
+            "wrong consider.ItemType"
+        );
+        require(consider.token == address(0), "wrong consider.token");
+
+        // TODO: introduce price Oracle to enable stopLossPrice selling
+        require(
+            consider.startAmount >= takeProfitPrice,
+            "wrong consider.startAmount"
+        );
+        require(
+            consider.endAmount >= takeProfitPrice,
+            "wrong consider.endAmount"
+        );
+
+        require(
+            consider.recipient == address(this),
+            "wrong consider.recipient"
+        );
+    }
+
+    // register sell orders for later isValidSignature checking
+    function registerSellOrder(Order[] calldata orders) external {
+        _verifySellOrders(orders);
+
+        // Skip overflow check as for loop is indexed starting at zero.
+        unchecked {
+            // Read length of the orders array from memory and place on stack.
+            uint256 totalOrders = orders.length;
+            uint256 counter = SeaportInterface(SEAPORT_CORE).getCounter(
+                address(this)
+            );
+
+            // Iterate over each order.
+            for (uint256 i = 0; i < totalOrders; ) {
+                Order calldata order = orders[i];
+                OrderParameters calldata orderParameters = order.parameters;
+
+                OrderComponents memory orderComponents = OrderComponents(
+                    orderParameters.offerer,
+                    orderParameters.zone,
+                    orderParameters.offer,
+                    orderParameters.consideration,
+                    orderParameters.orderType,
+                    orderParameters.startTime,
+                    orderParameters.endTime,
+                    orderParameters.zoneHash,
+                    orderParameters.salt,
+                    orderParameters.conduitKey,
+                    counter
+                );
+
+                // register orderHash
+                bytes32 orderHash = SeaportInterface(SEAPORT_CORE).getOrderHash(
+                    orderComponents
+                );
+                registerOrderHash[orderHash] = true;
+
+                // Increment counter inside body of the loop for gas efficiency.
+                ++i;
+            }
+        }
+    }
+
+    /** TODO
+     * @notice Verifies that the signer is the owner of the signing contract.
+     */
+    function isValidSignature(bytes32 _orderHash, bytes calldata _signature)
+        external
+        view
+        returns (bytes4)
+    {
+        //TODO ECDSA ECDSA.recover(hash, v, r, s);
+
+        // only allow seaport contract to check
+        require(msg.sender == SEAPORT_CORE, "only seaport");
+        // must use special signature placeholder
+        require(
+            keccak256(_signature) == keccak256(MAGIC_SIGNATURE),
+            "unallow signature"
+        );
+
+        if (registerOrderHash[_orderHash] == true) {
+            return MAGICVALUE;
+        }
+        return 0x1726ba12;
+    }
+
     /** @dev Distribute profits */
-    function settlementAllocation(bool takeTransferFee) public onlyOracle {
+    function settlementAllocation(bool takeTransferFee) external {
         require(canClaim == false, "already can claim");
 
         WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
@@ -285,7 +433,7 @@ contract XmobExchangeCore is
 
     /** @dev receive income  */
     function claim() public {
-        require(canClaim, "claim not started");
+        require(canClaim == true, "claim not started");
 
         uint256 amt = settlements[msg.sender];
         if (amt > 0) {
@@ -346,5 +494,13 @@ contract XmobExchangeCore is
     // only for local test
     function setWeth9Address(address weth9) external {
         WETH_ADDR = weth9;
+    }
+
+    // todo: remove this
+    // only for local test
+    function setSeaportAddress(address seaport) external {
+        SEAPORT_CORE = seaport;
+        // Approve All Token Nft-Id For SeaportCore contract
+        NftCommon(token).setApprovalForAll(SEAPORT_CORE, true);
     }
 }
