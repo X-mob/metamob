@@ -38,6 +38,6 @@ X-mob bring a new way to buy and sell nfts smooth.
 - X-Mob avoids a circumstance where the assets are locked in the contract because the members disagree with the terms of NFT selling due to the governance introduced to the current fragmentation scheme.
 
 # Compile Contracts
-* `yarn && yarn build`
+* `yarn && yarn deps && yarn build`
 # Running tests
 * `yarn run test`
