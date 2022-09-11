@@ -26,11 +26,11 @@ contract XmobExchangeCore is
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
     bytes4 internal constant MAGICVALUE = 0x1626ba7e;
 
-    bytes internal constant SIGNATURE_PLACEHOLDER = "0x42";
+    bytes internal constant MAGIC_SIGNATURE = "0x42";
 
     /** @dev seaport Opensea proxy  */
-    address public constant SEAPORT_CORE =
-        0x00000000006c3852cbEf3e08E8dF289169EdE581;
+    //todo: change to const for production
+    address public SEAPORT_CORE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
 
     /** @dev WETH ERC20 */
     //todo: change to const for production
@@ -390,7 +390,7 @@ contract XmobExchangeCore is
         require(msg.sender == SEAPORT_CORE, "only seaport");
         // must use special signature placeholder
         require(
-            keccak256(_signature) == keccak256(SIGNATURE_PLACEHOLDER),
+            keccak256(_signature) == keccak256(MAGIC_SIGNATURE),
             "unallow signature"
         );
 
@@ -401,7 +401,7 @@ contract XmobExchangeCore is
     }
 
     /** @dev Distribute profits */
-    function settlementAllocation(bool takeTransferFee) public onlyOracle {
+    function settlementAllocation(bool takeTransferFee) external {
         require(canClaim == false, "already can claim");
 
         WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
@@ -433,7 +433,7 @@ contract XmobExchangeCore is
 
     /** @dev receive income  */
     function claim() public {
-        require(canClaim, "claim not started");
+        require(canClaim == true, "claim not started");
 
         uint256 amt = settlements[msg.sender];
         if (amt > 0) {
@@ -494,5 +494,13 @@ contract XmobExchangeCore is
     // only for local test
     function setWeth9Address(address weth9) external {
         WETH_ADDR = weth9;
+    }
+
+    // todo: remove this
+    // only for local test
+    function setSeaportAddress(address seaport) external {
+        SEAPORT_CORE = seaport;
+        // Approve All Token Nft-Id For SeaportCore contract
+        NftCommon(token).setApprovalForAll(SEAPORT_CORE, true);
     }
 }
