@@ -14,6 +14,8 @@ import "./interfaces/WyvernExchange.sol";
 import "./interfaces/Seaport.sol";
 import "./interfaces/XmobManageInterface.sol";
 
+import "./lib/Constants.sol";
+
 contract XmobExchangeCore is
     Initializable,
     OwnableUpgradeable,
@@ -26,7 +28,7 @@ contract XmobExchangeCore is
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
     bytes4 internal constant MAGICVALUE = 0x1626ba7e;
 
-    bytes internal constant MAGIC_SIGNATURE = "0x42";
+    bytes public constant MAGIC_SIGNATURE = "0x42";
 
     /** @dev seaport Opensea proxy  */
     //todo: change to const for production
@@ -56,7 +58,7 @@ contract XmobExchangeCore is
 
     mapping(address => uint256) public settlements;
 
-    mapping(bytes32 => bool) public registerOrderHash;
+    mapping(bytes32 => bool) public registerOrderHashDigest; // orderHash eip1271 digest
 
     event MemberJoin(address member, uint256 value);
     event Exchanged(address indexed buyer, address indexed seller);
@@ -368,7 +370,12 @@ contract XmobExchangeCore is
                 bytes32 orderHash = SeaportInterface(SEAPORT_CORE).getOrderHash(
                     orderComponents
                 );
-                registerOrderHash[orderHash] = true;
+                // Derive EIP-712 digest using the domain separator and the order hash.
+                bytes32 digest = _deriveEIP712Digest(
+                    _deriveDomainSeparator(),
+                    orderHash
+                );
+                registerOrderHashDigest[digest] = true;
 
                 // Increment counter inside body of the loop for gas efficiency.
                 ++i;
@@ -376,28 +383,99 @@ contract XmobExchangeCore is
         }
     }
 
+    // taken from seaport contract
+    /**
+     * @dev Internal pure function to efficiently derive an digest to sign for
+     *      an order in accordance with EIP-712.
+     *
+     * @param domainSeparator The domain separator.
+     * @param orderHash       The order hash.
+     *
+     * @return value The hash.
+     */
+    function _deriveEIP712Digest(bytes32 domainSeparator, bytes32 orderHash)
+        internal
+        pure
+        returns (bytes32 value)
+    {
+        // Leverage scratch space to perform an efficient hash.
+        assembly {
+            // Place the EIP-712 prefix at the start of scratch space.
+            mstore(0, EIP_712_PREFIX)
+
+            // Place the domain separator in the next region of scratch space.
+            mstore(EIP712_DomainSeparator_offset, domainSeparator)
+
+            // Place the order hash in scratch space, spilling into the first
+            // two bytes of the free memory pointer — this should never be set
+            // as memory cannot be expanded to that size, and will be zeroed out
+            // after the hash is performed.
+            mstore(EIP712_OrderHash_offset, orderHash)
+
+            // Hash the relevant region (65 bytes).
+            value := keccak256(0, EIP712_DigestPayload_size)
+
+            // Clear out the dirtied bits in the memory pointer.
+            mstore(EIP712_OrderHash_offset, 0)
+        }
+    }
+
+    /**
+     * @dev Internal view function to derive the EIP-712 domain separator.
+     *
+     * @return The derived domain separator.
+     */
+    function _deriveDomainSeparator() internal view returns (bytes32) {
+        bytes32 _EIP_712_DOMAIN_TYPEHASH = keccak256(
+            abi.encodePacked(
+                "EIP712Domain(",
+                "string name,",
+                "string version,",
+                "uint256 chainId,",
+                "address verifyingContract",
+                ")"
+            )
+        );
+        // Derive hash of the name of the contract.
+        bytes32 nameHash = keccak256(bytes("Seaport"));
+
+        // Derive hash of the version string of the contract.
+        bytes32 versionHash = keccak256(bytes("1.1"));
+
+        // prettier-ignore
+        return keccak256(
+            abi.encode(
+                _EIP_712_DOMAIN_TYPEHASH,
+                nameHash,
+                versionHash,
+                block.chainid,
+                address(SEAPORT_CORE)
+            )
+        );
+    }
+
     /** TODO
      * @notice Verifies that the signer is the owner of the signing contract.
      */
-    function isValidSignature(bytes32 _orderHash, bytes calldata _signature)
-        external
-        view
-        returns (bytes4)
-    {
-        //TODO ECDSA ECDSA.recover(hash, v, r, s);
-
+    function isValidSignature(
+        bytes32 _orderHashDigest,
+        bytes calldata _signature
+    ) external view returns (bytes4) {
+        //TODO ECDSA ECDSA.recover(hash, v, r, s);f
         // only allow seaport contract to check
         require(msg.sender == SEAPORT_CORE, "only seaport");
-        // must use special signature placeholder
+
+        // must use special magic signature placeholder
         require(
             keccak256(_signature) == keccak256(MAGIC_SIGNATURE),
             "unallow signature"
         );
+        require(
+            registerOrderHashDigest[_orderHashDigest] == true,
+            "orderHash not register"
+        );
 
-        if (registerOrderHash[_orderHash] == true) {
-            return MAGICVALUE;
-        }
-        return 0x1726ba12;
+        return MAGICVALUE;
     }
 
     /** @dev Distribute profits */
