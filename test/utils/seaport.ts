@@ -1,9 +1,18 @@
 // most of code are taken from https://github.com/ProjectOpenSea/seaport/blob/1.1/test/utils/fixtures/marketplace.ts
 
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { BigNumber, BigNumberish, constants, Contract, Wallet } from "ethers";
-import { Seaport } from "../../typechain-types";
+import { keccak256, toUtf8Bytes } from "ethers/lib/utils";
+import {
+  Seaport,
+  TestERC721,
+  WETH9,
+  XmobExchangeCore,
+  XmobManage,
+} from "../../typechain-types";
 import { randomHex, toBN, toKey } from "./helper";
+import { checkCreateMob } from "./mob";
 import {
   AdditionalRecipient,
   BasicOrderParameters,
@@ -13,10 +22,11 @@ import {
   OfferItem,
   Order,
   OrderComponents,
+  OrderType,
 } from "./type";
 
 const VERSION = "1.1";
-const MAGIC_SIGNATURE = "0x42";
+const MAGIC_SIGNATURE = "0x30783432"; // 0x42
 
 export const seaportFixture = async (chainId: number, seaport: Seaport) => {
   // Required for EIP712 signing
@@ -37,6 +47,13 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
       orderComponents
     );
     return signature;
+  };
+
+  const getAndVerifyOrderHash = async (orderComponents: OrderComponents) => {
+    const orderHash = await seaport.getOrderHash(orderComponents);
+    const derivedOrderHash = calculateOrderHash(orderComponents);
+    expect(orderHash).to.equal(derivedOrderHash);
+    return orderHash;
   };
 
   const createOrder = async (
@@ -78,7 +95,7 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
       counter,
     };
 
-    const orderHash = await seaport.getOrderHash(orderComponents);
+    const orderHash = await getAndVerifyOrderHash(orderComponents);
     const { isValidated, isCancelled, totalFilled, totalSize } =
       await seaport.getOrderStatus(orderHash);
 
@@ -203,11 +220,166 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
     return offerItem as any;
   };
 
+  const createMobAndNftOrder = async (
+    {
+      admin,
+      seller,
+      buyer1,
+      buyer2,
+      buyer3,
+    }: {
+      admin: SignerWithAddress;
+      seller: Wallet;
+      buyer1: Wallet;
+      buyer2: Wallet;
+      buyer3: Wallet;
+    },
+    {
+      token,
+      tokenId,
+      testERC721,
+    }: {
+      token: string;
+      tokenId: number;
+      testERC721: TestERC721;
+    },
+    {
+      seaport,
+      xmobManage,
+      weth9,
+    }: { seaport: Seaport; xmobManage: XmobManage; weth9: WETH9 },
+    {
+      firstHandPrice,
+      depositValue,
+      _raisedTotal,
+      _takeProfitPrice,
+      _stopLossPrice,
+      _raisedAmountDeadline,
+      _deadline,
+    }: {
+      firstHandPrice: BigNumber;
+      depositValue: BigNumber;
+      _raisedTotal: BigNumber;
+      _takeProfitPrice: number | BigNumber;
+      _stopLossPrice: number | BigNumber;
+      _raisedAmountDeadline: number;
+      _deadline: number;
+    }
+  ) => {
+    await testERC721.mint(seller.address, tokenId);
+    await testERC721.connect(seller).setApprovalForAll(seaport.address, true);
+
+    // create a mob
+    const _mobName = "test mob";
+    const mob = await checkCreateMob(
+      admin,
+      xmobManage,
+      {
+        _token: token,
+        _tokenId: tokenId,
+        _raisedTotal,
+        _takeProfitPrice,
+        _stopLossPrice,
+        _raisedAmountDeadline,
+        _deadline,
+        _mobName,
+      },
+      weth9.address,
+      seaport.address
+    );
+
+    // deposit mob
+    await (
+      await mob.connect(buyer1).joinPay(buyer1.address, { value: depositValue })
+    ).wait();
+    await (
+      await mob.connect(buyer2).joinPay(buyer2.address, { value: depositValue })
+    ).wait();
+    await (
+      await mob.connect(buyer3).joinPay(buyer3.address, { value: depositValue })
+    ).wait();
+
+    {
+      const offer = getOfferOrConsiderationItem(
+        ItemType.ERC721,
+        token,
+        tokenId,
+        1,
+        1
+      );
+      const consideration = getOfferOrConsiderationItem(
+        ItemType.NATIVE,
+        constants.AddressZero,
+        undefined,
+        firstHandPrice,
+        firstHandPrice,
+        seller.address
+      );
+      const { order } = await createOrder(
+        seller,
+        [offer],
+        [consideration],
+        OrderType.FULL_OPEN,
+        undefined,
+        seller
+      );
+
+      const basicOrderParameters = await getBasicOrderParameters(
+        BasicOrderType.ETH_TO_ERC721_FULL_OPEN,
+        order
+      );
+
+      return { mob, order, basicOrderParameters };
+    }
+  };
+
+  const createMobSellingOrder = async ({
+    mob,
+    token,
+    tokenId,
+    sellingPrice,
+  }: {
+    mob: XmobExchangeCore;
+    token: string;
+    tokenId: number;
+    sellingPrice: BigNumber;
+  }) => {
+    const offer = getOfferOrConsiderationItem(
+      ItemType.ERC721,
+      token,
+      tokenId,
+      1,
+      1
+    );
+    const consideration = getOfferOrConsiderationItem(
+      ItemType.NATIVE,
+      constants.AddressZero,
+      undefined,
+      sellingPrice,
+      sellingPrice,
+      mob.address
+    ) as ConsiderationItem;
+    return await createOrder(
+      mob,
+      [offer],
+      [consideration],
+      OrderType.FULL_OPEN,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true // use magic_signature
+    );
+  };
+
   return {
     signOrder,
     createOrder,
     getOfferOrConsiderationItem,
     createBasicOrderWithMagicSignature,
+    createMobAndNftOrder,
+    createMobSellingOrder,
   };
 };
 
@@ -248,6 +420,102 @@ export const getBasicOrderParameters = (
     ...tips,
   ],
 });
+
+export const calculateOrderHash = (orderComponents: OrderComponents) => {
+  const offerItemTypeString =
+    "OfferItem(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)";
+  const considerationItemTypeString =
+    "ConsiderationItem(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount,address recipient)";
+  const orderComponentsPartialTypeString =
+    "OrderComponents(address offerer,address zone,OfferItem[] offer,ConsiderationItem[] consideration,uint8 orderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 conduitKey,uint256 counter)";
+  const orderTypeString = `${orderComponentsPartialTypeString}${considerationItemTypeString}${offerItemTypeString}`;
+
+  const offerItemTypeHash = keccak256(toUtf8Bytes(offerItemTypeString));
+  const considerationItemTypeHash = keccak256(
+    toUtf8Bytes(considerationItemTypeString)
+  );
+  const orderTypeHash = keccak256(toUtf8Bytes(orderTypeString));
+
+  const offerHash = keccak256(
+    "0x" +
+      orderComponents.offer
+        .map((offerItem) => {
+          return keccak256(
+            "0x" +
+              [
+                offerItemTypeHash.slice(2),
+                offerItem.itemType.toString().padStart(64, "0"),
+                offerItem.token.slice(2).padStart(64, "0"),
+                toBN(offerItem.identifierOrCriteria)
+                  .toHexString()
+                  .slice(2)
+                  .padStart(64, "0"),
+                toBN(offerItem.startAmount)
+                  .toHexString()
+                  .slice(2)
+                  .padStart(64, "0"),
+                toBN(offerItem.endAmount)
+                  .toHexString()
+                  .slice(2)
+                  .padStart(64, "0"),
+              ].join("")
+          ).slice(2);
+        })
+        .join("")
+  );
+
+  const considerationHash = keccak256(
+    "0x" +
+      orderComponents.consideration
+        .map((considerationItem) => {
+          return keccak256(
+            "0x" +
+              [
+                considerationItemTypeHash.slice(2),
+                considerationItem.itemType.toString().padStart(64, "0"),
+                considerationItem.token.slice(2).padStart(64, "0"),
+                toBN(considerationItem.identifierOrCriteria)
+                  .toHexString()
+                  .slice(2)
+                  .padStart(64, "0"),
+                toBN(considerationItem.startAmount)
+                  .toHexString()
+                  .slice(2)
+                  .padStart(64, "0"),
+                toBN(considerationItem.endAmount)
+                  .toHexString()
+                  .slice(2)
+                  .padStart(64, "0"),
+                considerationItem.recipient.slice(2).padStart(64, "0"),
+              ].join("")
+          ).slice(2);
+        })
+        .join("")
+  );
+
+  const derivedOrderHash = keccak256(
+    "0x" +
+      [
+        orderTypeHash.slice(2),
+        orderComponents.offerer.slice(2).padStart(64, "0"),
+        orderComponents.zone.slice(2).padStart(64, "0"),
+        offerHash.slice(2),
+        considerationHash.slice(2),
+        orderComponents.orderType.toString().padStart(64, "0"),
+        toBN(orderComponents.startTime)
+          .toHexString()
+          .slice(2)
+          .padStart(64, "0"),
+        toBN(orderComponents.endTime).toHexString().slice(2).padStart(64, "0"),
+        orderComponents.zoneHash.slice(2),
+        orderComponents.salt.slice(2).padStart(64, "0"),
+        orderComponents.conduitKey.slice(2).padStart(64, "0"),
+        toBN(orderComponents.counter).toHexString().slice(2).padStart(64, "0"),
+      ].join("")
+  );
+
+  return derivedOrderHash;
+};
 
 export const orderType = Object.freeze({
   OrderComponents: [
