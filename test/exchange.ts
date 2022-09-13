@@ -251,6 +251,17 @@ describe("XmobExchangeCore", function () {
     expect(await testERC721.balanceOf(mob.address)).to.equal(1);
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(mob.address);
 
+    // try validating invalid under-price order
+    const { order: invalidOrder } = await createMobSellingOrder({
+      mob,
+      token,
+      tokenId,
+      sellingPrice: secondHandPrice.sub(1),
+    });
+    await expect(mob.validateSellOrders([invalidOrder])).to.be.revertedWith(
+      "wrong consider.startAmount"
+    );
+
     // selling from mob
     const { order } = await createMobSellingOrder({
       mob,
@@ -347,6 +358,17 @@ describe("XmobExchangeCore", function () {
     await (await mob.connect(randomUser).buyNow(basicOrderParameters)).wait();
     expect(await testERC721.balanceOf(mob.address)).to.equal(1);
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(mob.address);
+
+    // try registering invalid under-price order
+    const { order: invalidOrder } = await createMobSellingOrder({
+      mob,
+      token,
+      tokenId,
+      sellingPrice: secondHandPrice.sub(1),
+    });
+    await expect(mob.registerSellOrder([invalidOrder])).to.be.revertedWith(
+      "wrong consider.startAmount"
+    );
 
     // selling from mob
     const { order } = await createMobSellingOrder({
