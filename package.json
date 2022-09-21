@@ -10,6 +10,7 @@
     "lint": "eslint -c ./.eslintrc.js \"test/*\" \"test/**/*\" \"scripts/*\" && solhint contracts/*.sol contracts/**/*.sol",
     "build": "hardhat compile",
     "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.ts",
     "coverage": "hardhat coverage --solcoverjs ./.solcover.js"
   },
   "keywords": [],

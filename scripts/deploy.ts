@@ -1,0 +1,60 @@
+import { ethers } from "hardhat";
+
+async function deploy() {
+  // deploy Seaport contract
+  const Conduit = await ethers.getContractFactory("ConduitController");
+  const conduitController = await Conduit.deploy();
+  await conduitController.deployed();
+
+  const Seaport = await ethers.getContractFactory("Seaport");
+  const seaport = await Seaport.deploy(conduitController.address);
+  await seaport.deployed();
+
+  // deploy WETH9 contract
+  const Weth9 = await ethers.getContractFactory("WETH9");
+  const weth9 = await Weth9.deploy();
+  await weth9.deployed();
+
+  // deploy test ERC721 token
+  const TestERC721 = await ethers.getContractFactory("TestERC721");
+  const testERC721 = await TestERC721.deploy();
+  await testERC721.deployed();
+
+  // deploy core metamob contracts
+  const xmobManageAddress = await deployMetamob();
+
+  return {
+    ...{
+      seaport: seaport.address,
+      weth9: weth9.address,
+      testERC721: testERC721.address,
+    },
+    ...xmobManageAddress,
+  };
+}
+
+async function deployMetamob() {
+  // deploy core metamob contracts
+  const ExchangeCore = await ethers.getContractFactory("XmobExchangeCore");
+  const exchangeCore = await ExchangeCore.deploy();
+  await exchangeCore.deployed();
+
+  const XmobManage = await ethers.getContractFactory("XmobManage");
+  const xmobManage = await XmobManage.deploy(exchangeCore.address);
+  await xmobManage.deployed();
+  return {
+    xmobManage: xmobManage.address,
+  };
+}
+
+async function main() {
+  // const addresses = await deploy();
+  // console.log(addresses);
+}
+
+// We recommend this pattern to be able to use async/await everywhere
+// and properly handle errors.
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
