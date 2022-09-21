@@ -1,6 +1,17 @@
 import { ethers } from "hardhat";
 
-async function deploy() {
+export async function deploy() {
+  // deploy core metamob contracts
+  const xmobManage = await deployMetamob();
+  const deps = await deployDeps();
+
+  return {
+    ...deps,
+    ...xmobManage,
+  };
+}
+
+export async function deployDeps() {
   // deploy Seaport contract
   const Conduit = await ethers.getContractFactory("ConduitController");
   const conduitController = await Conduit.deploy();
@@ -20,20 +31,15 @@ async function deploy() {
   const testERC721 = await TestERC721.deploy();
   await testERC721.deployed();
 
-  // deploy core metamob contracts
-  const xmobManageAddress = await deployMetamob();
-
   return {
-    ...{
-      seaport: seaport.address,
-      weth9: weth9.address,
-      testERC721: testERC721.address,
-    },
-    ...xmobManageAddress,
+    seaport,
+    conduitController,
+    weth9,
+    testERC721,
   };
 }
 
-async function deployMetamob() {
+export async function deployMetamob() {
   // deploy core metamob contracts
   const ExchangeCore = await ethers.getContractFactory("XmobExchangeCore");
   const exchangeCore = await ExchangeCore.deploy();
@@ -43,7 +49,8 @@ async function deployMetamob() {
   const xmobManage = await XmobManage.deploy(exchangeCore.address);
   await xmobManage.deployed();
   return {
-    xmobManage: xmobManage.address,
+    xmobManage,
+    exchangeCore
   };
 }
 

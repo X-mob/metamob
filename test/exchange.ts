@@ -15,6 +15,7 @@ import {
   seaportFixture,
 } from "../scripts/utils";
 import { initSomeWalletAccount } from "../scripts/utils/helper";
+import { deploy } from "../scripts/deploy";
 
 describe("XmobExchangeCore", function () {
   let weth9: WETH9;
@@ -28,33 +29,14 @@ describe("XmobExchangeCore", function () {
   let createMobSellingOrder: SeaportFixtures["createMobSellingOrder"];
 
   beforeEach(async () => {
-    // deploy Seaport contract
-    const Conduit = await ethers.getContractFactory("ConduitController");
-    conduitController = await Conduit.deploy();
-    await conduitController.deployed();
-
-    const Seaport = await ethers.getContractFactory("Seaport");
-    seaport = await Seaport.deploy(conduitController.address);
-    await seaport.deployed();
-
-    // deploy WETH9 contract
-    const Weth9 = await ethers.getContractFactory("WETH9");
-    weth9 = await Weth9.deploy();
-    await weth9.deployed();
-
-    // deploy test ERC721 token
-    const TestERC721 = await ethers.getContractFactory("TestERC721");
-    testERC721 = await TestERC721.deploy();
-    await testERC721.deployed();
-
-    // deploy core metamob contracts
-    const ExchangeCore = await ethers.getContractFactory("XmobExchangeCore");
-    exchangeCore = await ExchangeCore.deploy();
-    await exchangeCore.deployed();
-
-    const XmobManage = await ethers.getContractFactory("XmobManage");
-    xmobManage = await XmobManage.deploy(exchangeCore.address);
-    await xmobManage.deployed();
+    // deploy all contracts
+    const contracts = await deploy();
+    weth9 = contracts.weth9;
+    testERC721 = contracts.testERC721;
+    conduitController = contracts.conduitController;
+    seaport = contracts.seaport;
+    exchangeCore = contracts.exchangeCore;
+    xmobManage = contracts.xmobManage;
 
     const { chainId } = await ethers.provider.getNetwork();
     ({ createMobAndNftOrder, createMobSellingOrder } = await seaportFixture(
