@@ -7,7 +7,6 @@ import {
   XmobExchangeCore,
   XmobManage,
   Seaport,
-  ConduitController,
 } from "../typechain-types";
 import {
   checkCreateMob,
@@ -20,7 +19,6 @@ import { deploy } from "../scripts/deploy";
 describe("XmobExchangeCore", function () {
   let weth9: WETH9;
   let testERC721: TestERC721;
-  let conduitController: ConduitController;
   let seaport: Seaport;
   let exchangeCore: XmobExchangeCore;
   let xmobManage: XmobManage;
@@ -33,7 +31,6 @@ describe("XmobExchangeCore", function () {
     const contracts = await deploy();
     weth9 = contracts.weth9;
     testERC721 = contracts.testERC721;
-    conduitController = contracts.conduitController;
     seaport = contracts.seaport;
     exchangeCore = contracts.exchangeCore;
     xmobManage = contracts.xmobManage;

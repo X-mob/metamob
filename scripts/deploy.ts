@@ -50,13 +50,16 @@ export async function deployMetamob() {
   await xmobManage.deployed();
   return {
     xmobManage,
-    exchangeCore
+    exchangeCore,
   };
 }
 
 async function main() {
-  // const addresses = await deploy();
-  // console.log(addresses);
+  const contracts = await deploy();
+  const keys = Object.keys(contracts);
+  for (const key of keys) {
+    console.log(`${key}: ${(contracts as any)[key].address}`);
+  }
 }
 
 // We recommend this pattern to be able to use async/await everywhere

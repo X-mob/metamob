@@ -43,3 +43,10 @@ export const initSomeWalletAccount = async (n = 5) => {
   }
   return wallets;
 };
+
+export const capitalizeFirstLetter = function (str: string) {
+  if (str.length <= 1) {
+    throw new Error("at least two letters");
+  }
+  return str.charAt(0).toUpperCase() + str.slice(1);
+};
