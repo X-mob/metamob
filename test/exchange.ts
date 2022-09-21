@@ -9,8 +9,12 @@ import {
   Seaport,
   ConduitController,
 } from "../typechain-types";
-import { checkCreateMob, SeaportFixtures, seaportFixture } from "./utils";
-import { initSomeWalletAccount } from "./utils/helper";
+import {
+  checkCreateMob,
+  SeaportFixtures,
+  seaportFixture,
+} from "../scripts/utils";
+import { initSomeWalletAccount } from "../scripts/utils/helper";
 
 describe("XmobExchangeCore", function () {
   let weth9: WETH9;
