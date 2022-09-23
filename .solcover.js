@@ -1,4 +1,4 @@
 module.exports = {
-  skipFiles: [],
+  skipFiles: ["deps/"],
   configureYulOptimizer: true,
 };
