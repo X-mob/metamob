@@ -9,22 +9,6 @@ export async function setFeeRate(address: string) {
   await (await xmobManage.setFee(feeRate)).wait();
 }
 
-export async function setWeth(
-  weth9Addr: string,
-  xmobManageAddress: string,
-  mobId: number
-) {
-  const XmobManage = await ethers.getContractFactory("XmobManage");
-  const xmobManage = XmobManage.attach(xmobManageAddress);
-
-  const address = await xmobManage.mobsById(mobId);
-  const Mob = await ethers.getContractFactory("XmobExchangeCore");
-  const mob = Mob.attach(address);
-
-  // set weth9 address for test
-  await (await mob.setWeth9Address(weth9Addr)).wait();
-}
-
 export async function setSeaport(
   seaportAddr: string,
   xmobManageAddress: string,

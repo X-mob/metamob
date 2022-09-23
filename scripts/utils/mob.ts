@@ -19,7 +19,6 @@ export async function checkCreateMob(
   signer: SignerWithAddress,
   xmobManage: XmobManage,
   params: CreateMobParams,
-  weth9Addr?: string,
   seaportAddr?: string
 ): Promise<XmobExchangeCore> {
   const {
@@ -63,11 +62,6 @@ export async function checkCreateMob(
 
   const mob = await ethers.getContractAt("XmobExchangeCore", proxy);
 
-  if (weth9Addr) {
-    // set weth9 address for test
-    await (await mob.setWeth9Address(weth9Addr)).wait();
-    expect(await mob.WETH_ADDR()).to.be.equal(weth9Addr);
-  }
   if (seaportAddr) {
     // set seaport address for test
     await (await mob.setSeaportAddress(seaportAddr)).wait();

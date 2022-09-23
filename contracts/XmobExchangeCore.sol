@@ -7,12 +7,8 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-import "./interfaces/NftCommon.sol";
-import "./interfaces/Weth9.sol";
-import "./interfaces/WyvernProxyRegister.sol";
-import "./interfaces/WyvernExchange.sol";
+import "./interfaces/ERC721.sol";
 import "./interfaces/Seaport.sol";
-import "./interfaces/XmobManageInterface.sol";
 
 import "./lib/Constants.sol";
 
@@ -26,7 +22,7 @@ contract XmobExchangeCore is
     string public constant VERSION = "1.0.0";
 
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
-    bytes4 internal constant MAGICVALUE = 0x1626ba7e;
+    bytes4 internal constant MAGIC_VALUE = 0x1626ba7e;
 
     bytes public constant MAGIC_SIGNATURE = "0x42";
 
@@ -34,11 +30,6 @@ contract XmobExchangeCore is
     //todo: change to const for production
     address public SEAPORT_CORE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
 
-    /** @dev WETH ERC20 */
-    //todo: change to const for production
-    address public WETH_ADDR = 0xc778417E063141139Fce010982780140Aa0cD5Ab;
-
-    /** @dev Fee Account */
     address public creator;
     address public token;
     uint256 public amountTotal;
@@ -61,23 +52,11 @@ contract XmobExchangeCore is
     mapping(bytes32 => bool) public registerOrderHashDigest; // orderHash eip1271 digest
 
     event MemberJoin(address member, uint256 value);
-    event Exchanged(address indexed buyer, address indexed seller);
+    event Buy(address indexed seller, uint256 price);
     event Settlement(uint256 total, uint256 time);
     event DepositEth(address sender, uint256 amt);
     event Claim(address member, uint256 amt);
-    event Divestment(address member, uint256 amt);
-
-    /**
-     * @notice Oracle authority check
-     */
-    modifier onlyOracle() {
-        require(
-            XmobManageInterface(owner()).oracles(msg.sender),
-            "Unauthorized"
-        );
-
-        _;
-    }
+    event WithdrawStake(address member, uint256 amt);
 
     // Whether the raising has been completed
     modifier fundRaisingCompleted() {
@@ -123,11 +102,7 @@ contract XmobExchangeCore is
         }
 
         // Approve All Token Nft-Id For SeaportCore contract
-        NftCommon(_token).setApprovalForAll(SEAPORT_CORE, true);
-
-        // todo: un-comment this
-        // Approve Weth for openseaCore contract
-        //WETH9Interface(WETH_ADDR).approve(SEAPORT_CORE, raisedTotal);
+        ERC721(_token).setApprovalForAll(SEAPORT_CORE, true);
     }
 
     /**
@@ -144,8 +119,13 @@ contract XmobExchangeCore is
         );
     }
 
-    //weth swap
     receive() external payable {
+        if (msg.value > 0) {
+            emit DepositEth(msg.sender, msg.value);
+        }
+    }
+
+    fallback() external payable {
         if (msg.value > 0) {
             emit DepositEth(msg.sender, msg.value);
         }
@@ -171,22 +151,13 @@ contract XmobExchangeCore is
 
         amountTotal += amt;
 
-        //swap to WETH
-        WETH9Interface(WETH_ADDR).deposit{value: amt}();
-
         emit MemberJoin(addr, amt);
     }
 
     /** @notice withdraw stake  */
-    function divestment() public {
+    function withdrawStake() public {
         require(block.timestamp > raisedAmountDeadline, "fund raising");
         require(memberDetails[msg.sender] > 0, "no share");
-
-        WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
-        uint256 wamt = weth9.balanceOf(address(this));
-        if (wamt > 0) {
-            weth9.withdraw(wamt);
-        }
 
         uint256 amt = memberDetails[msg.sender];
         memberDetails[msg.sender] = 0;
@@ -194,15 +165,34 @@ contract XmobExchangeCore is
 
         payable(msg.sender).transfer(amt);
 
-        emit Divestment(msg.sender, amt);
+        emit WithdrawStake(msg.sender, amt);
     }
 
     // simple eth_to_erc721 buying
-    function buyNow(BasicOrderParameters calldata parameters)
+    function buyBasicOrder(BasicOrderParameters calldata parameters)
         external
         payable
         fundRaisingCompleted
         returns (bool isFulFilled)
+    {
+        _verifyBuyBasicOrder(parameters);
+
+        _takeFeeBeforeBuy();
+
+        bool isSuccess = SeaportInterface(SEAPORT_CORE).fulfillBasicOrder{
+            value: address(this).balance
+        }(parameters);
+
+        if (isSuccess) {
+            emit Buy(parameters.offerer, address(this).balance);
+        }
+
+        return isSuccess;
+    }
+
+    function _verifyBuyBasicOrder(BasicOrderParameters calldata parameters)
+        internal
+        view
     {
         require(
             parameters.basicOrderType == BasicOrderType.ETH_TO_ERC721_FULL_OPEN,
@@ -213,29 +203,80 @@ contract XmobExchangeCore is
             parameters.fulfillerConduitKey == bytes32(0),
             "fulfillerConduitKey must be zero"
         );
+    }
 
-        // convert weth to eth for buying since it is eth_to_erc721 type
-        WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
-        uint256 amt = weth9.balanceOf(address(this));
-        if (amt > 0) {
-            weth9.withdraw(amt);
+    // buy with seaport fulFillOrder
+    function buyOrder(Order calldata order, bytes32 fulfillerConduitKey)
+        external
+        payable
+        fundRaisingCompleted
+        returns (bool isFulFilled)
+    {
+        _verifyBuyOrder(order);
+        _verifyFulfillerConduitKey(fulfillerConduitKey);
+
+        _takeFeeBeforeBuy();
+
+        bool isSuccess = SeaportInterface(SEAPORT_CORE).fulfillOrder{
+            value: address(this).balance
+        }(order, fulfillerConduitKey);
+
+        if (isSuccess) {
+            emit Buy(order.parameters.offerer, address(this).balance);
         }
 
+        return isSuccess;
+    }
+
+    function _verifyFulfillerConduitKey(bytes32 fulfillerConduitKey)
+        internal
+        pure
+    {
+        require(fulfillerConduitKey == bytes32(0), "fulfillerConduitKey not 0");
+    }
+
+    function _verifyBuyOrder(Order calldata order) internal view {
+        OrderParameters calldata orderParameters = order.parameters;
+        // check order parameters
+        require(orderParameters.offer.length == 1, "offer length !=1");
+        require(
+            orderParameters.consideration.length == 1,
+            "consideration length !=1"
+        );
+        require(
+            orderParameters.totalOriginalConsiderationItems == uint256(1),
+            "OriginalConsider != 1"
+        );
+
+        _verifyBuyOrderOfferItem(orderParameters.offer[0]);
+        _verifyBuyOrderConsiderationItem(orderParameters.consideration[0]);
+    }
+
+    function _verifyBuyOrderOfferItem(OfferItem calldata offer) internal view {
+        require(offer.itemType == ItemType.ERC721, "wrong offer.ItemType");
+        require(offer.token == token, "wrong offer.token");
+        require(offer.startAmount == 1, "wrong offer.startAmount");
+        require(offer.endAmount == 1, "wrong offer.endAmount");
+    }
+
+    // only accept ether
+    function _verifyBuyOrderConsiderationItem(
+        ConsiderationItem calldata consider
+    ) internal pure {
+        require(
+            consider.itemType == ItemType.NATIVE,
+            "wrong consider.ItemType"
+        );
+        require(consider.token == address(0), "wrong consider.token");
+    }
+
+    function _takeFeeBeforeBuy() internal {
+        // todo: make sure fee can be taken
         // let admin take manage fee
         if (cost == 0 && fee > 0) {
             cost = fee;
             payable(owner()).transfer(fee);
         }
-
-        bool isSuccess = SeaportInterface(SEAPORT_CORE).fulfillBasicOrder{
-            value: address(this).balance
-        }(parameters);
-
-        if (isSuccess) {
-            emit Exchanged(address(this), parameters.offerer);
-        }
-
-        return isSuccess;
     }
 
     // submit sell orders on chain
@@ -475,21 +516,14 @@ contract XmobExchangeCore is
             "orderHash not register"
         );
 
-        return MAGICVALUE;
+        return MAGIC_VALUE;
     }
 
     /** @dev Distribute profits */
     function settlementAllocation(bool takeTransferFee) external {
         require(canClaim == false, "already can claim");
 
-        WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
-
-        uint256 amt = weth9.balanceOf(address(this));
-        if (amt > 0) {
-            weth9.withdraw(amt);
-        }
-
-        amt = address(this).balance;
+        uint256 amt = address(this).balance;
         require(amt > 0, "Amt must gt 0");
 
         canClaim = true;
@@ -556,29 +590,11 @@ contract XmobExchangeCore is
         );
     }
 
-    function balanceAll() public view returns (uint256, uint256) {
-        uint256 eth = address(this).balance;
-        uint256 wethbalance = WETH9Interface(WETH_ADDR).balanceOf(
-            address(this)
-        );
-        return (eth, wethbalance);
-    }
-
-    function oracles(address addr) public view returns (bool) {
-        return XmobManageInterface(owner()).oracles(addr);
-    }
-
-    // todo: remove this
-    // only for local test
-    function setWeth9Address(address weth9) external {
-        WETH_ADDR = weth9;
-    }
-
     // todo: remove this
     // only for local test
     function setSeaportAddress(address seaport) external {
         SEAPORT_CORE = seaport;
         // Approve All Token Nft-Id For SeaportCore contract
-        NftCommon(token).setApprovalForAll(SEAPORT_CORE, true);
+        ERC721(token).setApprovalForAll(SEAPORT_CORE, true);
     }
 }

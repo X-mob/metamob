@@ -7,7 +7,6 @@ import { keccak256, toUtf8Bytes } from "ethers/lib/utils";
 import {
   Seaport,
   TestERC721,
-  WETH9,
   XmobExchangeCore,
   XmobManage,
 } from "../../typechain-types";
@@ -243,11 +242,7 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
       tokenId: number;
       testERC721: TestERC721;
     },
-    {
-      seaport,
-      xmobManage,
-      weth9,
-    }: { seaport: Seaport; xmobManage: XmobManage; weth9: WETH9 },
+    { seaport, xmobManage }: { seaport: Seaport; xmobManage: XmobManage },
     {
       firstHandPrice,
       depositValue,
@@ -284,7 +279,6 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
         _deadline,
         _mobName,
       },
-      weth9.address,
       seaport.address
     );
 

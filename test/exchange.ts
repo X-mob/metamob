@@ -2,7 +2,6 @@ import { expect } from "chai";
 import { constants } from "ethers";
 import { ethers } from "hardhat";
 import {
-  WETH9,
   TestERC721,
   XmobExchangeCore,
   XmobManage,
@@ -17,7 +16,6 @@ import { initSomeWalletAccount } from "../scripts/utils/helper";
 import { deploy } from "../scripts/deploy";
 
 describe("XmobExchangeCore", function () {
-  let weth9: WETH9;
   let testERC721: TestERC721;
   let seaport: Seaport;
   let exchangeCore: XmobExchangeCore;
@@ -29,7 +27,6 @@ describe("XmobExchangeCore", function () {
   beforeEach(async () => {
     // deploy all contracts
     const contracts = await deploy();
-    weth9 = contracts.weth9;
     testERC721 = contracts.testERC721;
     seaport = contracts.seaport;
     exchangeCore = contracts.exchangeCore;
@@ -129,7 +126,6 @@ describe("XmobExchangeCore", function () {
         _deadline,
         _mobName,
       },
-      weth9.address,
       seaport.address
     );
 
@@ -170,9 +166,8 @@ describe("XmobExchangeCore", function () {
 
     // check mob balances
     {
-      const balances = await mob.balanceAll();
-      expect(balances[0]).to.be.equal(ethers.utils.parseEther("0"));
-      expect(balances[1]).to.be.equal(_raisedTotal);
+      const balances = await ethers.provider.getBalance(mob.address);
+      expect(balances).to.be.equal(_raisedTotal);
     }
 
     // distribute fund and claim
@@ -217,7 +212,7 @@ describe("XmobExchangeCore", function () {
     const { mob, basicOrderParameters } = await createMobAndNftOrder(
       { admin: owner, seller, buyer1, buyer2, buyer3 },
       { token, tokenId, testERC721 },
-      { seaport, xmobManage, weth9 },
+      { seaport, xmobManage },
       {
         depositValue,
         firstHandPrice,
@@ -230,7 +225,9 @@ describe("XmobExchangeCore", function () {
     );
 
     // buyNow
-    await (await mob.connect(randomUser).buyNow(basicOrderParameters)).wait();
+    await (
+      await mob.connect(randomUser).buyBasicOrder(basicOrderParameters)
+    ).wait();
     expect(await testERC721.balanceOf(mob.address)).to.equal(1);
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(mob.address);
 
@@ -260,8 +257,9 @@ describe("XmobExchangeCore", function () {
     ).wait();
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(secondBuyer.address);
     expect(await testERC721.balanceOf(mob.address)).to.equal(0);
-    expect((await mob.balanceAll())[0]).to.equal(secondHandPrice);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(
+      secondHandPrice
+    );
 
     // settlement
     expect(await mob.amountTotal()).to.equal(firstHandPrice);
@@ -297,8 +295,7 @@ describe("XmobExchangeCore", function () {
     expect(diff).to.be.lte(depositValue.add(earn));
 
     // contract should left no money
-    expect((await mob.balanceAll())[0]).to.equal(0);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(0);
   });
 
   it("Mob buyNow => registerSellingOrder => claim flow", async function () {
@@ -325,7 +322,7 @@ describe("XmobExchangeCore", function () {
     const { mob, basicOrderParameters } = await createMobAndNftOrder(
       { admin: owner, seller, buyer1, buyer2, buyer3 },
       { token, tokenId, testERC721 },
-      { seaport, xmobManage, weth9 },
+      { seaport, xmobManage },
       {
         depositValue,
         firstHandPrice,
@@ -338,7 +335,9 @@ describe("XmobExchangeCore", function () {
     );
 
     // buyNow
-    await (await mob.connect(randomUser).buyNow(basicOrderParameters)).wait();
+    await (
+      await mob.connect(randomUser).buyBasicOrder(basicOrderParameters)
+    ).wait();
     expect(await testERC721.balanceOf(mob.address)).to.equal(1);
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(mob.address);
 
@@ -371,8 +370,9 @@ describe("XmobExchangeCore", function () {
 
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(secondBuyer.address);
     expect(await testERC721.balanceOf(mob.address)).to.equal(0);
-    expect((await mob.balanceAll())[0]).to.equal(secondHandPrice);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(
+      secondHandPrice
+    );
 
     // settlement
     expect(await mob.amountTotal()).to.equal(firstHandPrice);
@@ -408,8 +408,7 @@ describe("XmobExchangeCore", function () {
     expect(diff).to.be.lte(depositValue.add(earn));
 
     // contract should left no money
-    expect((await mob.balanceAll())[0]).to.equal(0);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(0);
   });
 
   // todo: add new function to support advance buying
