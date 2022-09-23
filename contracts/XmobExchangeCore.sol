@@ -12,6 +12,39 @@ import "./interfaces/Seaport.sol";
 
 import "./lib/Constants.sol";
 
+// note: only include successful status
+enum MobStatus {
+    RAISING,
+    RAISE_SUCCESS,
+    NFT_BOUGHT,
+    // NFT_SELLING, we can not check nft is sold on chain
+    CAN_CLAIM,
+    ALL_CLAIMED
+}
+
+enum TargetMode {
+    // only buy tokenId NFT
+    RESTRICT,
+    // don't check tokenId, any tokenId within token is good
+    FULL_OPEN
+}
+
+struct MobMetadata {
+    string name;
+    address creator;
+    address token; // nft token address
+    uint256 tokenId; // nft token id, ERC721 standard require uint256
+    uint256 raisedAmount;
+    uint256 raiseTarget;
+    uint256 takeProfitPrice;
+    uint256 stopLossPrice;
+    uint256 fee;
+    uint64 deadline;
+    uint64 raiseDeadline;
+    TargetMode targetMode;
+    MobStatus status;
+}
+
 contract XmobExchangeCore is
     Initializable,
     OwnableUpgradeable,
@@ -30,19 +63,7 @@ contract XmobExchangeCore is
     //todo: change to const for production
     address public SEAPORT_CORE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
 
-    address public creator;
-    address public token;
-    uint256 public amountTotal;
-    uint256 public raisedTotal;
-    uint256 public takeProfitPrice;
-    uint256 public stopLossPrice;
-    uint256 public raisedAmountDeadline;
-    uint256 public deadline;
-    uint256 public cost;
-    uint256 public fee;
-    bool public canClaim;
-    string public mobName;
-
+    MobMetadata public metadata;
     address[] public members;
 
     mapping(address => uint256) public memberDetails;
@@ -54,48 +75,121 @@ contract XmobExchangeCore is
     event MemberJoin(address member, uint256 value);
     event Buy(address indexed seller, uint256 price);
     event Settlement(uint256 total, uint256 time);
+    event SettlementAfterDeadline(uint256 total, uint256 time);
+    event SettlementAfterBuyFailed(uint256 total);
     event DepositEth(address sender, uint256 amt);
     event Claim(address member, uint256 amt);
-    event WithdrawStake(address member, uint256 amt);
+    event RefundAfterRaiseFailed(address member, uint256 amt);
 
-    // Whether the raising has been completed
-    modifier fundRaisingCompleted() {
-        require(raisedTotal == amountTotal, "Not started");
+    modifier requireStatus(MobStatus _status) {
+        require(metadata.status == _status, "wrong status");
+        _;
+    }
+
+    // Whether the mob deadline has reached
+    modifier deadlineReached() {
+        require(block.timestamp > metadata.deadline, "still in deadline");
+        _;
+    }
+
+    // Whether the raising has close the time window
+    modifier fundRaiseTimeClosed() {
+        require(block.timestamp > metadata.raiseDeadline, "fund raising");
+        _;
+    }
+
+    // Whether the raising is open
+    modifier fundRaiseOpen() {
+        require(block.timestamp < metadata.raiseDeadline, "time closed");
+        require(
+            metadata.raisedAmount < metadata.raiseTarget,
+            "target already meet"
+        );
+        _;
+    }
+
+    // Whether the raising is open
+    modifier fundRaiseFailed() {
+        require(block.timestamp > metadata.raiseDeadline, "time not closed");
+        require(
+            metadata.raisedAmount < metadata.raiseTarget,
+            "target already meet"
+        );
+        _;
+    }
+
+    // Whether the raising has been successfully completed
+    modifier fundRaiseMeetsTarget() {
+        require(
+            metadata.raisedAmount == metadata.raiseTarget,
+            "target not meet"
+        );
+        _;
+    }
+
+    // Whether the NFT has been successfully owned
+    modifier ownedNFT() {
+        if (metadata.targetMode == TargetMode.FULL_OPEN) {
+            uint256 bal = ERC721(metadata.token).balanceOf(address(this));
+            require(bal > 0, "no nft bal");
+        }
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            address owner = ERC721(metadata.token).ownerOf(metadata.tokenId);
+            require(owner == address(this), "not nft owner");
+        }
+        _;
+    }
+
+    // Whether the NFT has been unowned
+    modifier unownedNFT() {
+        if (metadata.targetMode == TargetMode.FULL_OPEN) {
+            uint256 bal = ERC721(metadata.token).balanceOf(address(this));
+            require(bal == 0, "nft bal not 0");
+        }
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            address owner = ERC721(metadata.token).ownerOf(metadata.tokenId);
+            require(owner != address(this), "nft still owned");
+        }
         _;
     }
 
     // @custom:oz-upgrades-unsafe-allow constructor
-    constructor() initializer {
-        canClaim = false;
-    }
+    constructor() initializer {}
 
     function initialize(
         address _creator,
         address _token,
+        uint256 _tokenId,
         uint256 _fee,
-        uint256 _raisedTotal,
+        uint256 _raiseTarget,
         uint256 _takeProfitPrice,
         uint256 _stopLossPrice,
-        uint256 _raisedAmountDeadline,
-        uint256 _deadline,
+        uint64 _raiseDeadline,
+        uint64 _deadline,
+        TargetMode _targetMode,
         string memory _mobName
     ) public payable initializer {
         __Ownable_init();
         __UUPSUpgradeable_init();
 
-        require(_fee < _raisedTotal, "Fee error");
-        require(_deadline > _raisedAmountDeadline, "Deadline error");
-        require(_raisedAmountDeadline > block.timestamp, "EndTime gt now");
+        require(_fee < _raiseTarget, "Fee error");
+        require(_deadline > _raiseDeadline, "Deadline error");
+        require(_raiseDeadline > block.timestamp, "EndTime gt now");
 
-        creator = _creator;
-        token = _token;
-        fee = _fee;
-        raisedTotal = _raisedTotal;
-        takeProfitPrice = _takeProfitPrice;
-        stopLossPrice = _stopLossPrice;
-        deadline = _deadline;
-        raisedAmountDeadline = _raisedAmountDeadline;
-        mobName = _mobName;
+        metadata.creator = _creator;
+        metadata.token = _token;
+        metadata.tokenId = _tokenId;
+        metadata.fee = _fee;
+        metadata.raiseTarget = _raiseTarget;
+        metadata.takeProfitPrice = _takeProfitPrice;
+        metadata.stopLossPrice = _stopLossPrice;
+        metadata.deadline = _deadline;
+        metadata.raiseDeadline = _raiseDeadline;
+        metadata.name = _mobName;
+        metadata.status = MobStatus.RAISING;
+        metadata.targetMode = _targetMode;
 
         if (msg.value > 0) {
             memberDeposit(_creator, msg.value);
@@ -125,54 +219,66 @@ contract XmobExchangeCore is
         }
     }
 
-    fallback() external payable {
-        if (msg.value > 0) {
-            emit DepositEth(msg.sender, msg.value);
-        }
-    }
-
     /**
      * @notice members join pay ETH
      */
-    function joinPay(address member) public payable {
+    function joinPay(address member)
+        public
+        payable
+        fundRaiseOpen
+        requireStatus(MobStatus.RAISING)
+    {
         memberDeposit(member, msg.value);
     }
 
-    function memberDeposit(address addr, uint256 amt) internal {
+    function memberDeposit(address addr, uint256 amt)
+        internal
+        fundRaiseOpen
+        requireStatus(MobStatus.RAISING)
+    {
         require(amt > 0, "Value must gt 0");
-        require(raisedAmountDeadline > block.timestamp, "Fundraising closed");
-        require(raisedTotal > amountTotal, "Insufficient quota");
-        require(raisedTotal >= amountTotal + amt, "Exceeding the limit");
+        require(
+            metadata.raiseTarget >= metadata.raisedAmount + amt,
+            "Exceeding the limit"
+        );
 
         if (memberDetails[addr] == 0) {
             members.push(addr);
         }
         memberDetails[addr] = memberDetails[addr] + amt;
 
-        amountTotal += amt;
+        metadata.raisedAmount += amt;
+
+        if (metadata.raisedAmount == metadata.raiseTarget) {
+            _applyNextStatus();
+        }
 
         emit MemberJoin(addr, amt);
     }
 
-    /** @notice withdraw stake  */
-    function withdrawStake() public {
-        require(block.timestamp > raisedAmountDeadline, "fund raising");
+    /** @notice refund stake after raise failed */
+    function refundAfterRaiseFailed()
+        public
+        fundRaiseTimeClosed
+        requireStatus(MobStatus.RAISING)
+    {
         require(memberDetails[msg.sender] > 0, "no share");
 
         uint256 amt = memberDetails[msg.sender];
         memberDetails[msg.sender] = 0;
-        amountTotal -= amt;
+        metadata.raisedAmount -= amt;
 
         payable(msg.sender).transfer(amt);
 
-        emit WithdrawStake(msg.sender, amt);
+        emit RefundAfterRaiseFailed(msg.sender, amt);
     }
 
     // simple eth_to_erc721 buying
     function buyBasicOrder(BasicOrderParameters calldata parameters)
         external
         payable
-        fundRaisingCompleted
+        fundRaiseMeetsTarget
+        requireStatus(MobStatus.RAISE_SUCCESS)
         returns (bool isFulFilled)
     {
         _verifyBuyBasicOrder(parameters);
@@ -185,6 +291,7 @@ contract XmobExchangeCore is
 
         if (isSuccess) {
             emit Buy(parameters.offerer, address(this).balance);
+            _applyNextStatus();
         }
 
         return isSuccess;
@@ -198,7 +305,7 @@ contract XmobExchangeCore is
             parameters.basicOrderType == BasicOrderType.ETH_TO_ERC721_FULL_OPEN,
             "wrong order type"
         );
-        require(parameters.offerToken == token, "buying wrong token");
+        require(parameters.offerToken == metadata.token, "buying wrong token");
         require(
             parameters.fulfillerConduitKey == bytes32(0),
             "fulfillerConduitKey must be zero"
@@ -209,7 +316,8 @@ contract XmobExchangeCore is
     function buyOrder(Order calldata order, bytes32 fulfillerConduitKey)
         external
         payable
-        fundRaisingCompleted
+        fundRaiseMeetsTarget
+        requireStatus(MobStatus.RAISE_SUCCESS)
         returns (bool isFulFilled)
     {
         _verifyBuyOrder(order);
@@ -254,7 +362,7 @@ contract XmobExchangeCore is
 
     function _verifyBuyOrderOfferItem(OfferItem calldata offer) internal view {
         require(offer.itemType == ItemType.ERC721, "wrong offer.ItemType");
-        require(offer.token == token, "wrong offer.token");
+        require(offer.token == metadata.token, "wrong offer.token");
         require(offer.startAmount == 1, "wrong offer.startAmount");
         require(offer.endAmount == 1, "wrong offer.endAmount");
     }
@@ -270,12 +378,15 @@ contract XmobExchangeCore is
         require(consider.token == address(0), "wrong consider.token");
     }
 
-    function _takeFeeBeforeBuy() internal {
+    function _takeFeeBeforeBuy()
+        internal
+        fundRaiseMeetsTarget
+        requireStatus(MobStatus.RAISING)
+    {
         // todo: make sure fee can be taken
         // let admin take manage fee
-        if (cost == 0 && fee > 0) {
-            cost = fee;
-            payable(owner()).transfer(fee);
+        if (metadata.fee > 0) {
+            payable(owner()).transfer(metadata.fee);
         }
     }
 
@@ -283,6 +394,8 @@ contract XmobExchangeCore is
     // only the offerer require no signature
     function validateSellOrders(Order[] calldata orders)
         external
+        ownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT)
         returns (bool isValidated)
     {
         _verifySellOrders(orders);
@@ -344,7 +457,7 @@ contract XmobExchangeCore is
 
     function _verifyOfferItem(OfferItem calldata offer) internal view {
         require(offer.itemType == ItemType.ERC721, "wrong offer.ItemType");
-        require(offer.token == token, "wrong offer.token");
+        require(offer.token == metadata.token, "wrong offer.token");
         require(offer.startAmount == 1, "wrong offer.startAmount");
         require(offer.endAmount == 1, "wrong offer.endAmount");
     }
@@ -362,11 +475,11 @@ contract XmobExchangeCore is
 
         // TODO: introduce price Oracle to enable stopLossPrice selling
         require(
-            consider.startAmount >= takeProfitPrice,
+            consider.startAmount >= metadata.takeProfitPrice,
             "wrong consider.startAmount"
         );
         require(
-            consider.endAmount >= takeProfitPrice,
+            consider.endAmount >= metadata.takeProfitPrice,
             "wrong consider.endAmount"
         );
 
@@ -377,7 +490,11 @@ contract XmobExchangeCore is
     }
 
     // register sell orders for later isValidSignature checking
-    function registerSellOrder(Order[] calldata orders) external {
+    function registerSellOrder(Order[] calldata orders)
+        external
+        ownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT)
+    {
         _verifySellOrders(orders);
 
         // Skip overflow check as for loop is indexed starting at zero.
@@ -501,9 +618,15 @@ contract XmobExchangeCore is
     function isValidSignature(
         bytes32 _orderHashDigest,
         bytes calldata _signature
-    ) external view returns (bytes4) {
+    )
+        external
+        view
+        ownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT) // only selling needs signature
+        returns (bytes4)
+    {
         //TODO ECDSA ECDSA.recover(hash, v, r, s);f
-        // only allow seaport contract to check
+        // only allow seaport contract to call
         require(msg.sender == SEAPORT_CORE, "only seaport");
 
         // must use special magic signature placeholder
@@ -520,33 +643,68 @@ contract XmobExchangeCore is
     }
 
     /** @dev Distribute profits */
-    function settlementAllocation(bool takeTransferFee) external {
-        require(canClaim == false, "already can claim");
-
+    function settlementAllocation()
+        external
+        unownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT)
+    {
         uint256 amt = address(this).balance;
         require(amt > 0, "Amt must gt 0");
 
-        canClaim = true;
-
-        // check if fee is needed
-        if (takeTransferFee && cost == 0 && fee > 0) {
-            cost = fee;
-            amt = address(this).balance - fee;
-            payable(owner()).transfer(fee);
-        }
+        _applyNextStatus();
 
         for (uint256 i = 0; i < members.length; i++) {
             uint256 share = memberDetails[members[i]];
-            settlements[members[i]] = (amt / amountTotal) * share;
+            settlements[members[i]] = (amt / metadata.raisedAmount) * share;
         }
 
         emit Settlement(amt, block.timestamp);
     }
 
-    /** @dev receive income  */
-    function claim() public {
-        require(canClaim == true, "claim not started");
+    /** @dev Distribute profits after deadline,
+     *  use for two situation
+     *      1. nft balance attaking(already sold nft)
+     *      2. nft can not be sold after deadline
+     */
+    function settlementAfterDeadline()
+        external
+        deadlineReached
+        requireStatus(MobStatus.NFT_BOUGHT)
+    {
+        uint256 amt = address(this).balance;
+        require(amt > 0, "Amt must gt 0");
 
+        _applyNextStatus();
+
+        for (uint256 i = 0; i < members.length; i++) {
+            uint256 share = memberDetails[members[i]];
+            settlements[members[i]] = (amt / metadata.raisedAmount) * share;
+        }
+
+        emit SettlementAfterDeadline(amt, block.timestamp);
+    }
+
+    /** @dev refund after deadline, use for buy failed */
+    function settlementAfterBuyFailed()
+        external
+        deadlineReached
+        requireStatus(MobStatus.RAISE_SUCCESS)
+    {
+        uint256 amt = address(this).balance;
+        require(amt > 0, "Amt must gt 0");
+
+        _applyNextStatus();
+
+        for (uint256 i = 0; i < members.length; i++) {
+            uint256 share = memberDetails[members[i]];
+            settlements[members[i]] = (amt / metadata.raisedAmount) * share;
+        }
+
+        emit SettlementAfterBuyFailed(amt);
+    }
+
+    /** @dev receive income  */
+    function claim() public requireStatus(MobStatus.CAN_CLAIM) {
         uint256 amt = settlements[msg.sender];
         if (amt > 0) {
             settlements[msg.sender] = 0;
@@ -560,7 +718,7 @@ contract XmobExchangeCore is
             }
         }
         if (isAllClaimed) {
-            canClaim = false;
+            _applyNextStatus();
         }
 
         if (amt > 0) {
@@ -568,26 +726,8 @@ contract XmobExchangeCore is
         }
     }
 
-    function mobItem()
-        public
-        view
-        returns (
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256
-        )
-    {
-        return (
-            amountTotal,
-            raisedTotal,
-            takeProfitPrice,
-            stopLossPrice,
-            deadline,
-            raisedAmountDeadline
-        );
+    function _applyNextStatus() internal {
+        metadata.status = MobStatus(uint256(metadata.status) + 1);
     }
 
     // todo: remove this
@@ -595,6 +735,6 @@ contract XmobExchangeCore is
     function setSeaportAddress(address seaport) external {
         SEAPORT_CORE = seaport;
         // Approve All Token Nft-Id For SeaportCore contract
-        ERC721(token).setApprovalForAll(SEAPORT_CORE, true);
+        ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
     }
 }

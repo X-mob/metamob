@@ -17,7 +17,7 @@ contract XmobManage is Ownable {
     mapping(uint256 => address) public mobsById;
 
     struct Mob {
-        uint256 raisedTotal;
+        uint256 raiseTarget;
         uint256 raisedAmountDeadline;
         uint256 deadline;
         uint256 fee;
@@ -109,7 +109,7 @@ contract XmobManage is Ownable {
 
         Mob storage mobInfo = mobs[address(mob)];
         mobInfo.creator = msg.sender;
-        mobInfo.raisedTotal = _raisedTotal;
+        mobInfo.raiseTarget = _raisedTotal;
         mobInfo.name = _mobName;
         mobInfo.raisedAmountDeadline = _raisedAmountDeadline;
         mobInfo.deadline = _deadline;
