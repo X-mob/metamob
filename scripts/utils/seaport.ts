@@ -22,6 +22,7 @@ import {
   Order,
   OrderComponents,
   OrderType,
+  TargetMode,
 } from "./type";
 
 const VERSION = "1.1";
@@ -246,18 +247,20 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
     {
       firstHandPrice,
       depositValue,
-      _raisedTotal,
+      _raiseTarget,
       _takeProfitPrice,
       _stopLossPrice,
-      _raisedAmountDeadline,
+      _raiseDeadline,
+      _targetMode,
       _deadline,
     }: {
       firstHandPrice: BigNumber;
       depositValue: BigNumber;
-      _raisedTotal: BigNumber;
+      _raiseTarget: BigNumber;
       _takeProfitPrice: number | BigNumber;
       _stopLossPrice: number | BigNumber;
-      _raisedAmountDeadline: number;
+      _raiseDeadline: number;
+      _targetMode: TargetMode;
       _deadline: number;
     }
   ) => {
@@ -272,12 +275,13 @@ export const seaportFixture = async (chainId: number, seaport: Seaport) => {
       {
         _token: token,
         _tokenId: tokenId,
-        _raisedTotal,
+        _raiseTarget,
         _takeProfitPrice,
         _stopLossPrice,
-        _raisedAmountDeadline,
+        _raiseDeadline,
         _deadline,
-        _mobName,
+        _targetMode,
+        _name: _mobName,
       },
       seaport.address
     );

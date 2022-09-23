@@ -11,39 +11,7 @@ import "./interfaces/ERC721.sol";
 import "./interfaces/Seaport.sol";
 
 import "./lib/Constants.sol";
-
-// note: only include successful status
-enum MobStatus {
-    RAISING,
-    RAISE_SUCCESS,
-    NFT_BOUGHT,
-    // NFT_SELLING, we can not check nft is sold on chain
-    CAN_CLAIM,
-    ALL_CLAIMED
-}
-
-enum TargetMode {
-    // only buy tokenId NFT
-    RESTRICT,
-    // don't check tokenId, any tokenId within token is good
-    FULL_OPEN
-}
-
-struct MobMetadata {
-    string name;
-    address creator;
-    address token; // nft token address
-    uint256 tokenId; // nft token id, ERC721 standard require uint256
-    uint256 raisedAmount;
-    uint256 raiseTarget;
-    uint256 takeProfitPrice;
-    uint256 stopLossPrice;
-    uint256 fee;
-    uint64 deadline;
-    uint64 raiseDeadline;
-    TargetMode targetMode;
-    MobStatus status;
-}
+import "./lib/MobStruct.sol";
 
 contract XmobExchangeCore is
     Initializable,
@@ -168,15 +136,17 @@ contract XmobExchangeCore is
         uint256 _stopLossPrice,
         uint64 _raiseDeadline,
         uint64 _deadline,
-        TargetMode _targetMode,
-        string memory _mobName
+        uint8 _targetMode,
+        string memory _name
     ) public payable initializer {
         __Ownable_init();
         __UUPSUpgradeable_init();
 
+        require(_raiseTarget >= MINIMAL_RAISE_TARGET, "raiseTarget too small");
         require(_fee < _raiseTarget, "Fee error");
         require(_deadline > _raiseDeadline, "Deadline error");
         require(_raiseDeadline > block.timestamp, "EndTime gt now");
+        require(_takeProfitPrice > _stopLossPrice, "price error");
 
         metadata.creator = _creator;
         metadata.token = _token;
@@ -187,9 +157,11 @@ contract XmobExchangeCore is
         metadata.stopLossPrice = _stopLossPrice;
         metadata.deadline = _deadline;
         metadata.raiseDeadline = _raiseDeadline;
-        metadata.name = _mobName;
+        metadata.name = _name;
         metadata.status = MobStatus.RAISING;
-        metadata.targetMode = _targetMode;
+
+        TargetMode targetMode = _getTargetMode(_targetMode);
+        metadata.targetMode = targetMode;
 
         if (msg.value > 0) {
             memberDeposit(_creator, msg.value);
@@ -247,11 +219,11 @@ contract XmobExchangeCore is
         }
         memberDetails[addr] = memberDetails[addr] + amt;
 
-        metadata.raisedAmount += amt;
-
-        if (metadata.raisedAmount == metadata.raiseTarget) {
+        if (metadata.raiseTarget == metadata.raisedAmount + amt) {
             _applyNextStatus();
         }
+
+        metadata.raisedAmount += amt;
 
         emit MemberJoin(addr, amt);
     }
@@ -310,6 +282,13 @@ contract XmobExchangeCore is
             parameters.fulfillerConduitKey == bytes32(0),
             "fulfillerConduitKey must be zero"
         );
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            require(
+                parameters.offerIdentifier == metadata.tokenId,
+                "wrong offer.tokenId"
+            );
+        }
     }
 
     // buy with seaport fulFillOrder
@@ -365,6 +344,13 @@ contract XmobExchangeCore is
         require(offer.token == metadata.token, "wrong offer.token");
         require(offer.startAmount == 1, "wrong offer.startAmount");
         require(offer.endAmount == 1, "wrong offer.endAmount");
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            require(
+                offer.identifierOrCriteria == metadata.tokenId,
+                "wrong offer.tokenId"
+            );
+        }
     }
 
     // only accept ether
@@ -381,9 +367,8 @@ contract XmobExchangeCore is
     function _takeFeeBeforeBuy()
         internal
         fundRaiseMeetsTarget
-        requireStatus(MobStatus.RAISING)
+        requireStatus(MobStatus.RAISE_SUCCESS)
     {
-        // todo: make sure fee can be taken
         // let admin take manage fee
         if (metadata.fee > 0) {
             payable(owner()).transfer(metadata.fee);
@@ -427,10 +412,12 @@ contract XmobExchangeCore is
                     orderParameters.zoneHash == bytes32(0),
                     "zoneHash != 0"
                 );
-                require(orderParameters.offer.length == 1, "offer length !=1");
+
+                // allow to accept extra offer/consideration
+                require(orderParameters.offer.length >= 1, "offer length 0");
                 require(
-                    orderParameters.consideration.length == 1,
-                    "consideration length !=1"
+                    orderParameters.consideration.length >= 1,
+                    "consideration length 0"
                 );
                 require(
                     orderParameters.orderType == OrderType.FULL_OPEN,
@@ -440,12 +427,8 @@ contract XmobExchangeCore is
                     orderParameters.conduitKey == bytes32(0),
                     "conduitKey != 0"
                 );
-                require(
-                    orderParameters.totalOriginalConsiderationItems ==
-                        uint256(1),
-                    "OriginalConsider != 1"
-                );
 
+                // only check if first offer/consideration meet requirement
                 _verifyOfferItem(orderParameters.offer[0]);
                 _verifyConsiderationItem(orderParameters.consideration[0]);
 
@@ -460,6 +443,13 @@ contract XmobExchangeCore is
         require(offer.token == metadata.token, "wrong offer.token");
         require(offer.startAmount == 1, "wrong offer.startAmount");
         require(offer.endAmount == 1, "wrong offer.endAmount");
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            require(
+                offer.identifierOrCriteria == metadata.tokenId,
+                "wrong offer.tokenId"
+            );
+        }
     }
 
     // only accept ether
@@ -663,8 +653,14 @@ contract XmobExchangeCore is
 
     /** @dev Distribute profits after deadline,
      *  use for two situation
-     *      1. nft balance attaking(already sold nft)
+     *      1. nft balance attacking(contract already sold nft)
      *      2. nft can not be sold after deadline
+     *
+     * Note: another way to deal with nft balance attacking
+     * is to continually sell the new receieved attacking nft
+     * to empty the balance so that settlement can be called.
+     * In that case, members might gain some extra profit,
+     * and there remains little motivation for attacker to do that.
      */
     function settlementAfterDeadline()
         external
@@ -728,6 +724,20 @@ contract XmobExchangeCore is
 
     function _applyNextStatus() internal {
         metadata.status = MobStatus(uint256(metadata.status) + 1);
+    }
+
+    function _getTargetMode(uint8 mode)
+        internal
+        pure
+        returns (TargetMode targetMode)
+    {
+        if (mode == uint256(TargetMode.RESTRICT)) {
+            return TargetMode.RESTRICT;
+        } else if (mode == uint256(TargetMode.FULL_OPEN)) {
+            return TargetMode.RESTRICT;
+        } else {
+            revert("invalid target mode");
+        }
     }
 
     // todo: remove this

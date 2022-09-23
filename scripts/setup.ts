@@ -2,11 +2,10 @@
 
 import { ethers } from "hardhat";
 
-export async function setFeeRate(address: string) {
-  const feeRate = 20;
+export async function setFeeRate(address: string, feeRate: number = 20) {
   const XmobManage = await ethers.getContractFactory("XmobManage");
   const xmobManage = XmobManage.attach(address);
-  await (await xmobManage.setFee(feeRate)).wait();
+  await (await xmobManage.setFeeRate(feeRate)).wait();
 }
 
 export async function setSeaport(
