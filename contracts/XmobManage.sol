@@ -4,8 +4,8 @@ pragma solidity ^0.8.4;
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./XmobExchangeProxy.sol";
-
-import "./interfaces/XmobExchangeCoreInterface.sol";
+import "./lib/Constants.sol";
+import "./lib/MobStruct.sol";
 
 contract XmobManage is Ownable {
     // initial exchangeCore contract address
@@ -15,48 +15,30 @@ contract XmobManage is Ownable {
 
     uint256 public mobsTotal;
 
-    mapping(address => Mob) public mobs;
     mapping(uint256 => address) public mobsById;
 
-    mapping(address => bool) public oracles;
-
-    struct Mob {
-        uint256 raisedTotal;
-        uint256 rasiedAmountDeadline;
-        uint256 deadline;
-        uint256 fee;
-        address creator;
-        string name;
-    }
-
-    event ProxySet(address proxy);
-    event Excuted(
-        address indexed target,
-        uint256 amt,
-        bytes data,
-        bytes result
-    );
+    event XMobProxySet(address proxy);
     event Withdraw(address addr, uint256 amt);
-    event OracleSet(address indexed admin, bool state);
-    event FeeSet(uint8 feeRate);
+    event FeeRateSet(uint8 feeRate);
     event MobCreate(
         address indexed creator,
         address indexed token,
         uint256 indexed tokenId,
         address proxy,
-        uint256 raisedTotal,
+        uint256 id,
+        uint256 raiseTarget,
         uint256 takeProfitPrice,
         uint256 stopLossPrice,
         uint256 fee,
         uint256 deadline,
-        uint256 rasiedAmountDeadline,
+        uint256 raiseDeadline,
+        uint8 targetMode,
         string name
     );
-    event MobDeposit(address indexed mob, address indexed sender, uint256 amt);
     event DepositEth(address sender, uint256 amt);
 
     constructor(address _exchangeCore) {
-        setProxy(_exchangeCore);
+        _setXMobProxy(_exchangeCore);
     }
 
     receive() external payable {
@@ -77,21 +59,15 @@ contract XmobManage is Ownable {
     function createMob(
         address _token,
         uint256 _tokenId,
-        uint256 _raisedTotal,
+        uint256 _raiseTarget,
         uint256 _takeProfitPrice,
         uint256 _stopLossPrice,
-        uint256 _rasiedAmountDeadline,
-        uint256 _deadline,
-        string memory _mobName
+        uint64 _raiseDeadline,
+        uint64 _deadline,
+        uint8 _targetMode,
+        string memory _name
     ) public payable returns (address) {
-        require(
-            _deadline > block.timestamp &&
-                _takeProfitPrice > _stopLossPrice &&
-                _raisedTotal > 0,
-            "Params error"
-        );
-
-        uint256 fee = (_raisedTotal * feeRate) / 1000;
+        uint256 fee = calcFee(_raiseTarget);
 
         XmobExchangeProxy mob = new XmobExchangeProxy{value: msg.value}(
             exchangeCore,
@@ -99,98 +75,66 @@ contract XmobManage is Ownable {
                 bytes4(
                     keccak256(
                         bytes(
-                            "initialize(address,address,uint256,uint256,uint256,uint256,uint256,uint256,string)"
+                            "initialize(address,address,uint256,uint256,uint256,uint256,uint256,uint64,uint64,uint8,string)"
                         )
                     )
                 ),
                 msg.sender,
                 _token,
+                _tokenId,
                 fee,
-                _raisedTotal,
+                _raiseTarget,
                 _takeProfitPrice,
                 _stopLossPrice,
-                _rasiedAmountDeadline,
+                _raiseDeadline,
                 _deadline,
-                _mobName
+                _targetMode,
+                _name
             )
         );
 
         mobsTotal += 1;
-
         mobsById[mobsTotal] = address(mob);
 
-        Mob storage mobInfo = mobs[address(mob)];
-        mobInfo.creator = msg.sender;
-        mobInfo.raisedTotal = _raisedTotal;
-        mobInfo.name = _mobName;
-        mobInfo.rasiedAmountDeadline = _rasiedAmountDeadline;
-        mobInfo.deadline = _deadline;
-        mobInfo.fee = fee;
-
         emit MobCreate(
-            mobInfo.creator,
+            msg.sender,
             _token,
             _tokenId,
             address(mob),
-            _raisedTotal,
+            mobsTotal,
+            _raiseTarget,
             _takeProfitPrice,
             _stopLossPrice,
-            mobInfo.fee,
-            mobInfo.deadline,
-            mobInfo.rasiedAmountDeadline,
-            mobInfo.name
+            fee,
+            _deadline,
+            _raiseDeadline,
+            _targetMode,
+            _name
         );
-
-        if (msg.value > 0) {
-            emit MobDeposit(address(mob), msg.sender, msg.value);
-        }
 
         return address(mob);
     }
 
-    /** @dev depost eth for mob */
-    function mobDeposit(address mob) public payable {
-        require(msg.value > 0, "ETH gt 0");
-
-        Mob storage mobInfo = mobs[mob];
-        require(mobInfo.creator != address(0), "Mob not exists");
-        require(mobInfo.deadline > block.timestamp, "Mob Expired");
-
-        XmobExchangeCoreInterface mobCore = XmobExchangeCoreInterface(mob);
-
-        require(
-            mobCore.amountTotal() + msg.value <= mobInfo.raisedTotal,
-            "Insufficient quota"
-        );
-
-        mobCore.joinPay{value: msg.value}(msg.sender);
-
-        emit MobDeposit(mob, msg.sender, msg.value);
-    }
-
     /** @dev set fee */
-    function setFee(uint8 _feeRate) public onlyOwner {
+    function setFeeRate(uint8 _feeRate) public onlyOwner {
+        // note: fee rate can be 0
         require(_feeRate < 1000, "feeRate gt 1000");
         feeRate = _feeRate;
-        emit FeeSet(feeRate);
+        emit FeeRateSet(feeRate);
     }
 
-    /** @dev XmobExchang manager */
-    function setOracle(address oracle, bool state) public onlyOwner {
-        require(oracles[oracle] != state, "already set");
+    function calcFee(uint256 _raiseTarget) public view returns (uint256 fee) {
+        require(_raiseTarget >= MINIMAL_RAISE_TARGET, "raiseTarget too small");
 
-        oracles[oracle] = state;
-
-        emit OracleSet(oracle, state);
+        fee = (_raiseTarget * feeRate) / 1000;
+        if (feeRate != 0 && fee < MINIMAL_FEE) {
+            fee = MINIMAL_FEE;
+        }
+        return fee;
     }
 
     /** @dev exchange core proxy  */
-    function _setProxy(address _exchangeCore) public onlyOwner {
-        setProxy(_exchangeCore);
-    }
-
-    /** @dev set core proxy  */
-    function setProxy(address _exchangeCore) internal {
+    function _setXMobProxy(address _exchangeCore) internal {
         uint256 size;
         assembly {
             size := extcodesize(_exchangeCore)
@@ -198,7 +142,12 @@ contract XmobManage is Ownable {
         require(size > 0, "not contract");
 
         exchangeCore = _exchangeCore;
-        emit ProxySet(_exchangeCore);
+        emit XMobProxySet(_exchangeCore);
+    }
+
+    /** @dev exchange core proxy but external */
+    function setXMobProxy(address _exchangeCore) public onlyOwner {
+        _setXMobProxy(_exchangeCore);
     }
 
     /** @dev Administrator withdraws management fee  */

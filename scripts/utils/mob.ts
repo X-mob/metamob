@@ -3,34 +3,36 @@ import { BigNumber } from "ethers";
 import { ethers } from "hardhat";
 import { XmobExchangeCore, XmobManage } from "../../typechain-types";
 import { expect } from "chai";
+import { TargetMode } from "./type";
 
 export interface CreateMobParams {
   _token: string;
   _tokenId: number;
-  _raisedTotal: BigNumber;
+  _raiseTarget: BigNumber;
   _takeProfitPrice: number | BigNumber;
   _stopLossPrice: number | BigNumber;
-  _raisedAmountDeadline: number;
+  _raiseDeadline: number;
   _deadline: number;
-  _mobName: string;
+  _targetMode: TargetMode;
+  _name: string;
 }
 
 export async function checkCreateMob(
   signer: SignerWithAddress,
   xmobManage: XmobManage,
   params: CreateMobParams,
-  weth9Addr?: string,
   seaportAddr?: string
 ): Promise<XmobExchangeCore> {
   const {
     _token,
     _tokenId,
-    _raisedTotal,
+    _raiseTarget,
     _takeProfitPrice,
     _stopLossPrice,
-    _raisedAmountDeadline,
+    _raiseDeadline,
     _deadline,
-    _mobName,
+    _targetMode,
+    _name,
   } = params;
 
   const originMobsTotal = await xmobManage.mobsTotal();
@@ -40,12 +42,13 @@ export async function checkCreateMob(
     .createMob(
       _token,
       _tokenId,
-      _raisedTotal,
+      _raiseTarget,
       _takeProfitPrice,
       _stopLossPrice,
-      _raisedAmountDeadline,
+      _raiseDeadline,
       _deadline,
-      _mobName
+      _targetMode.valueOf(),
+      _name
     );
   const receipt = await createTx.wait();
   const topic = xmobManage.interface.getEventTopic("MobCreate");
@@ -63,11 +66,6 @@ export async function checkCreateMob(
 
   const mob = await ethers.getContractAt("XmobExchangeCore", proxy);
 
-  if (weth9Addr) {
-    // set weth9 address for test
-    await (await mob.setWeth9Address(weth9Addr)).wait();
-    expect(await mob.WETH_ADDR()).to.be.equal(weth9Addr);
-  }
   if (seaportAddr) {
     // set seaport address for test
     await (await mob.setSeaportAddress(seaportAddr)).wait();

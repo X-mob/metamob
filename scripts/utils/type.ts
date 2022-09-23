@@ -1,5 +1,21 @@
 import type { BigNumber } from "ethers";
 
+export enum TargetMode {
+  // only buy tokenId NFT
+  RESTRICT,
+  // don't check tokenId, any tokenId within token is good
+  FULL_OPEN,
+}
+
+export enum MobStatus {
+  RAISING,
+  RAISE_SUCCESS,
+  NFT_BOUGHT,
+  // NFT_SELLING, we can not check nft is sold on chain
+  CAN_CLAIM,
+  ALL_CLAIMED,
+}
+
 export enum ItemType {
   // 0: ETH on mainnet, MATIC on polygon, etc.
   NATIVE,

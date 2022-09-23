@@ -7,14 +7,11 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-import "./interfaces/NftCommon.sol";
-import "./interfaces/Weth9.sol";
-import "./interfaces/WyvernProxyRegister.sol";
-import "./interfaces/WyvernExchange.sol";
+import "./interfaces/ERC721.sol";
 import "./interfaces/Seaport.sol";
-import "./interfaces/XmobManageInterface.sol";
 
 import "./lib/Constants.sol";
+import "./lib/MobStruct.sol";
 
 contract XmobExchangeCore is
     Initializable,
@@ -26,7 +23,7 @@ contract XmobExchangeCore is
     string public constant VERSION = "1.0.0";
 
     /** @dev bytes4(keccak256("isValidSignature(bytes32,bytes)") */
-    bytes4 internal constant MAGICVALUE = 0x1626ba7e;
+    bytes4 internal constant MAGIC_VALUE = 0x1626ba7e;
 
     bytes public constant MAGIC_SIGNATURE = "0x42";
 
@@ -34,24 +31,7 @@ contract XmobExchangeCore is
     //todo: change to const for production
     address public SEAPORT_CORE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
 
-    /** @dev WETH ERC20 */
-    //todo: change to const for production
-    address public WETH_ADDR = 0xc778417E063141139Fce010982780140Aa0cD5Ab;
-
-    /** @dev Fee Account */
-    address public creator;
-    address public token;
-    uint256 public amountTotal;
-    uint256 public raisedTotal;
-    uint256 public takeProfitPrice;
-    uint256 public stopLossPrice;
-    uint256 public raisedAmountDeadline;
-    uint256 public deadline;
-    uint256 public cost;
-    uint256 public fee;
-    bool public canClaim;
-    string public mobName;
-
+    MobMetadata public metadata;
     address[] public members;
 
     mapping(address => uint256) public memberDetails;
@@ -61,73 +41,134 @@ contract XmobExchangeCore is
     mapping(bytes32 => bool) public registerOrderHashDigest; // orderHash eip1271 digest
 
     event MemberJoin(address member, uint256 value);
-    event Exchanged(address indexed buyer, address indexed seller);
+    event Buy(address indexed seller, uint256 price);
     event Settlement(uint256 total, uint256 time);
+    event SettlementAfterDeadline(uint256 total, uint256 time);
+    event SettlementAfterBuyFailed(uint256 total);
     event DepositEth(address sender, uint256 amt);
     event Claim(address member, uint256 amt);
-    event Divestment(address member, uint256 amt);
+    event RefundAfterRaiseFailed(address member, uint256 amt);
 
-    /**
-     * @notice Oracle authority check
-     */
-    modifier onlyOracle() {
-        require(
-            XmobManageInterface(owner()).oracles(msg.sender),
-            "Unauthorized"
-        );
-
+    modifier requireStatus(MobStatus _status) {
+        require(metadata.status == _status, "wrong status");
         _;
     }
 
-    // Whether the raising has been completed
-    modifier fundRaisingCompleted() {
-        require(raisedTotal == amountTotal, "Not started");
+    // Whether the mob deadline has reached
+    modifier deadlineReached() {
+        require(block.timestamp > metadata.deadline, "still in deadline");
+        _;
+    }
+
+    // Whether the raising has close the time window
+    modifier fundRaiseTimeClosed() {
+        require(block.timestamp > metadata.raiseDeadline, "fund raising");
+        _;
+    }
+
+    // Whether the raising is open
+    modifier fundRaiseOpen() {
+        require(block.timestamp < metadata.raiseDeadline, "time closed");
+        require(
+            metadata.raisedAmount < metadata.raiseTarget,
+            "target already meet"
+        );
+        _;
+    }
+
+    // Whether the raising is open
+    modifier fundRaiseFailed() {
+        require(block.timestamp > metadata.raiseDeadline, "time not closed");
+        require(
+            metadata.raisedAmount < metadata.raiseTarget,
+            "target already meet"
+        );
+        _;
+    }
+
+    // Whether the raising has been successfully completed
+    modifier fundRaiseMeetsTarget() {
+        require(
+            metadata.raisedAmount == metadata.raiseTarget,
+            "target not meet"
+        );
+        _;
+    }
+
+    // Whether the NFT has been successfully owned
+    modifier ownedNFT() {
+        if (metadata.targetMode == TargetMode.FULL_OPEN) {
+            uint256 bal = ERC721(metadata.token).balanceOf(address(this));
+            require(bal > 0, "no nft bal");
+        }
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            address owner = ERC721(metadata.token).ownerOf(metadata.tokenId);
+            require(owner == address(this), "not nft owner");
+        }
+        _;
+    }
+
+    // Whether the NFT has been unowned
+    modifier unownedNFT() {
+        if (metadata.targetMode == TargetMode.FULL_OPEN) {
+            uint256 bal = ERC721(metadata.token).balanceOf(address(this));
+            require(bal == 0, "nft bal not 0");
+        }
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            address owner = ERC721(metadata.token).ownerOf(metadata.tokenId);
+            require(owner != address(this), "nft still owned");
+        }
         _;
     }
 
     // @custom:oz-upgrades-unsafe-allow constructor
-    constructor() initializer {
-        canClaim = false;
-    }
+    constructor() initializer {}
 
     function initialize(
         address _creator,
         address _token,
+        uint256 _tokenId,
         uint256 _fee,
-        uint256 _raisedTotal,
+        uint256 _raiseTarget,
         uint256 _takeProfitPrice,
         uint256 _stopLossPrice,
-        uint256 _raisedAmountDeadline,
-        uint256 _deadline,
-        string memory _mobName
+        uint64 _raiseDeadline,
+        uint64 _deadline,
+        uint8 _targetMode,
+        string memory _name
     ) public payable initializer {
         __Ownable_init();
         __UUPSUpgradeable_init();
 
-        require(_fee < _raisedTotal, "Fee error");
-        require(_deadline > _raisedAmountDeadline, "Deadline error");
-        require(_raisedAmountDeadline > block.timestamp, "EndTime gt now");
+        require(_raiseTarget >= MINIMAL_RAISE_TARGET, "raiseTarget too small");
+        require(_fee < _raiseTarget, "Fee error");
+        require(_deadline > _raiseDeadline, "Deadline error");
+        require(_raiseDeadline > block.timestamp, "EndTime gt now");
+        require(_takeProfitPrice > _stopLossPrice, "price error");
 
-        creator = _creator;
-        token = _token;
-        fee = _fee;
-        raisedTotal = _raisedTotal;
-        takeProfitPrice = _takeProfitPrice;
-        stopLossPrice = _stopLossPrice;
-        deadline = _deadline;
-        raisedAmountDeadline = _raisedAmountDeadline;
-        mobName = _mobName;
+        metadata.creator = _creator;
+        metadata.token = _token;
+        metadata.tokenId = _tokenId;
+        metadata.fee = _fee;
+        metadata.raiseTarget = _raiseTarget;
+        metadata.takeProfitPrice = _takeProfitPrice;
+        metadata.stopLossPrice = _stopLossPrice;
+        metadata.deadline = _deadline;
+        metadata.raiseDeadline = _raiseDeadline;
+        metadata.name = _name;
+        metadata.status = MobStatus.RAISING;
+
+        TargetMode targetMode = _getTargetMode(_targetMode);
+        metadata.targetMode = targetMode;
 
         if (msg.value > 0) {
             memberDeposit(_creator, msg.value);
         }
 
         // Approve All Token Nft-Id For SeaportCore contract
-        NftCommon(_token).setApprovalForAll(SEAPORT_CORE, true);
-
-        // todo: un-comment this
-        // Approve Weth for openseaCore contract
-        //WETH9Interface(WETH_ADDR).approve(SEAPORT_CORE, raisedTotal);
+        ERC721(_token).setApprovalForAll(SEAPORT_CORE, true);
     }
 
     /**
@@ -144,7 +185,6 @@ contract XmobExchangeCore is
         );
     }
 
-    //weth swap
     receive() external payable {
         if (msg.value > 0) {
             emit DepositEth(msg.sender, msg.value);
@@ -154,94 +194,193 @@ contract XmobExchangeCore is
     /**
      * @notice members join pay ETH
      */
-    function joinPay(address member) public payable {
+    function joinPay(address member)
+        public
+        payable
+        fundRaiseOpen
+        requireStatus(MobStatus.RAISING)
+    {
         memberDeposit(member, msg.value);
     }
 
-    function memberDeposit(address addr, uint256 amt) internal {
+    function memberDeposit(address addr, uint256 amt)
+        internal
+        fundRaiseOpen
+        requireStatus(MobStatus.RAISING)
+    {
         require(amt > 0, "Value must gt 0");
-        require(raisedAmountDeadline > block.timestamp, "Fundraising closed");
-        require(raisedTotal > amountTotal, "Insufficient quota");
-        require(raisedTotal >= amountTotal + amt, "Exceeding the limit");
+        require(
+            metadata.raiseTarget >= metadata.raisedAmount + amt,
+            "Exceeding the limit"
+        );
 
         if (memberDetails[addr] == 0) {
             members.push(addr);
         }
         memberDetails[addr] = memberDetails[addr] + amt;
 
-        amountTotal += amt;
+        if (metadata.raiseTarget == metadata.raisedAmount + amt) {
+            _applyNextStatus();
+        }
 
-        //swap to WETH
-        WETH9Interface(WETH_ADDR).deposit{value: amt}();
+        metadata.raisedAmount += amt;
 
         emit MemberJoin(addr, amt);
     }
 
-    /** @notice withdraw stake  */
-    function divestment() public {
-        require(block.timestamp > raisedAmountDeadline, "fund raising");
+    /** @notice refund stake after raise failed */
+    function refundAfterRaiseFailed()
+        public
+        fundRaiseTimeClosed
+        requireStatus(MobStatus.RAISING)
+    {
         require(memberDetails[msg.sender] > 0, "no share");
-
-        WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
-        uint256 wamt = weth9.balanceOf(address(this));
-        if (wamt > 0) {
-            weth9.withdraw(wamt);
-        }
 
         uint256 amt = memberDetails[msg.sender];
         memberDetails[msg.sender] = 0;
-        amountTotal -= amt;
+        metadata.raisedAmount -= amt;
 
         payable(msg.sender).transfer(amt);
 
-        emit Divestment(msg.sender, amt);
+        emit RefundAfterRaiseFailed(msg.sender, amt);
     }
 
     // simple eth_to_erc721 buying
-    function buyNow(BasicOrderParameters calldata parameters)
+    function buyBasicOrder(BasicOrderParameters calldata parameters)
         external
         payable
-        fundRaisingCompleted
+        fundRaiseMeetsTarget
+        requireStatus(MobStatus.RAISE_SUCCESS)
         returns (bool isFulFilled)
     {
-        require(
-            parameters.basicOrderType == BasicOrderType.ETH_TO_ERC721_FULL_OPEN,
-            "wrong order type"
-        );
-        require(parameters.offerToken == token, "buying wrong token");
-        require(
-            parameters.fulfillerConduitKey == bytes32(0),
-            "fulfillerConduitKey must be zero"
-        );
+        _verifyBuyBasicOrder(parameters);
 
-        // convert weth to eth for buying since it is eth_to_erc721 type
-        WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
-        uint256 amt = weth9.balanceOf(address(this));
-        if (amt > 0) {
-            weth9.withdraw(amt);
-        }
-
-        // let admin take manage fee
-        if (cost == 0 && fee > 0) {
-            cost = fee;
-            payable(owner()).transfer(fee);
-        }
+        _takeFeeBeforeBuy();
 
         bool isSuccess = SeaportInterface(SEAPORT_CORE).fulfillBasicOrder{
             value: address(this).balance
         }(parameters);
 
         if (isSuccess) {
-            emit Exchanged(address(this), parameters.offerer);
+            emit Buy(parameters.offerer, address(this).balance);
+            _applyNextStatus();
         }
 
         return isSuccess;
+    }
+
+    function _verifyBuyBasicOrder(BasicOrderParameters calldata parameters)
+        internal
+        view
+    {
+        require(
+            parameters.basicOrderType == BasicOrderType.ETH_TO_ERC721_FULL_OPEN,
+            "wrong order type"
+        );
+        require(parameters.offerToken == metadata.token, "buying wrong token");
+        require(
+            parameters.fulfillerConduitKey == bytes32(0),
+            "fulfillerConduitKey must be zero"
+        );
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            require(
+                parameters.offerIdentifier == metadata.tokenId,
+                "wrong offer.tokenId"
+            );
+        }
+    }
+
+    // buy with seaport fulFillOrder
+    function buyOrder(Order calldata order, bytes32 fulfillerConduitKey)
+        external
+        payable
+        fundRaiseMeetsTarget
+        requireStatus(MobStatus.RAISE_SUCCESS)
+        returns (bool isFulFilled)
+    {
+        _verifyBuyOrder(order);
+        _verifyFulfillerConduitKey(fulfillerConduitKey);
+
+        _takeFeeBeforeBuy();
+
+        bool isSuccess = SeaportInterface(SEAPORT_CORE).fulfillOrder{
+            value: address(this).balance
+        }(order, fulfillerConduitKey);
+
+        if (isSuccess) {
+            emit Buy(order.parameters.offerer, address(this).balance);
+        }
+
+        return isSuccess;
+    }
+
+    function _verifyFulfillerConduitKey(bytes32 fulfillerConduitKey)
+        internal
+        pure
+    {
+        require(fulfillerConduitKey == bytes32(0), "fulfillerConduitKey not 0");
+    }
+
+    function _verifyBuyOrder(Order calldata order) internal view {
+        OrderParameters calldata orderParameters = order.parameters;
+        // check order parameters
+        require(orderParameters.offer.length == 1, "offer length !=1");
+        require(
+            orderParameters.consideration.length == 1,
+            "consideration length !=1"
+        );
+        require(
+            orderParameters.totalOriginalConsiderationItems == uint256(1),
+            "OriginalConsider != 1"
+        );
+
+        _verifyBuyOrderOfferItem(orderParameters.offer[0]);
+        _verifyBuyOrderConsiderationItem(orderParameters.consideration[0]);
+    }
+
+    function _verifyBuyOrderOfferItem(OfferItem calldata offer) internal view {
+        require(offer.itemType == ItemType.ERC721, "wrong offer.ItemType");
+        require(offer.token == metadata.token, "wrong offer.token");
+        require(offer.startAmount == 1, "wrong offer.startAmount");
+        require(offer.endAmount == 1, "wrong offer.endAmount");
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            require(
+                offer.identifierOrCriteria == metadata.tokenId,
+                "wrong offer.tokenId"
+            );
+        }
+    }
+
+    // only accept ether
+    function _verifyBuyOrderConsiderationItem(
+        ConsiderationItem calldata consider
+    ) internal pure {
+        require(
+            consider.itemType == ItemType.NATIVE,
+            "wrong consider.ItemType"
+        );
+        require(consider.token == address(0), "wrong consider.token");
+    }
+
+    function _takeFeeBeforeBuy()
+        internal
+        fundRaiseMeetsTarget
+        requireStatus(MobStatus.RAISE_SUCCESS)
+    {
+        // let admin take manage fee
+        if (metadata.fee > 0) {
+            payable(owner()).transfer(metadata.fee);
+        }
     }
 
     // submit sell orders on chain
     // only the offerer require no signature
     function validateSellOrders(Order[] calldata orders)
         external
+        ownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT)
         returns (bool isValidated)
     {
         _verifySellOrders(orders);
@@ -273,10 +412,12 @@ contract XmobExchangeCore is
                     orderParameters.zoneHash == bytes32(0),
                     "zoneHash != 0"
                 );
-                require(orderParameters.offer.length == 1, "offer length !=1");
+
+                // allow to accept extra offer/consideration
+                require(orderParameters.offer.length >= 1, "offer length 0");
                 require(
-                    orderParameters.consideration.length == 1,
-                    "consideration length !=1"
+                    orderParameters.consideration.length >= 1,
+                    "consideration length 0"
                 );
                 require(
                     orderParameters.orderType == OrderType.FULL_OPEN,
@@ -286,12 +427,8 @@ contract XmobExchangeCore is
                     orderParameters.conduitKey == bytes32(0),
                     "conduitKey != 0"
                 );
-                require(
-                    orderParameters.totalOriginalConsiderationItems ==
-                        uint256(1),
-                    "OriginalConsider != 1"
-                );
 
+                // only check if first offer/consideration meet requirement
                 _verifyOfferItem(orderParameters.offer[0]);
                 _verifyConsiderationItem(orderParameters.consideration[0]);
 
@@ -303,9 +440,16 @@ contract XmobExchangeCore is
 
     function _verifyOfferItem(OfferItem calldata offer) internal view {
         require(offer.itemType == ItemType.ERC721, "wrong offer.ItemType");
-        require(offer.token == token, "wrong offer.token");
+        require(offer.token == metadata.token, "wrong offer.token");
         require(offer.startAmount == 1, "wrong offer.startAmount");
         require(offer.endAmount == 1, "wrong offer.endAmount");
+
+        if (metadata.targetMode == TargetMode.RESTRICT) {
+            require(
+                offer.identifierOrCriteria == metadata.tokenId,
+                "wrong offer.tokenId"
+            );
+        }
     }
 
     // only accept ether
@@ -321,11 +465,11 @@ contract XmobExchangeCore is
 
         // TODO: introduce price Oracle to enable stopLossPrice selling
         require(
-            consider.startAmount >= takeProfitPrice,
+            consider.startAmount >= metadata.takeProfitPrice,
             "wrong consider.startAmount"
         );
         require(
-            consider.endAmount >= takeProfitPrice,
+            consider.endAmount >= metadata.takeProfitPrice,
             "wrong consider.endAmount"
         );
 
@@ -336,7 +480,11 @@ contract XmobExchangeCore is
     }
 
     // register sell orders for later isValidSignature checking
-    function registerSellOrder(Order[] calldata orders) external {
+    function registerSellOrder(Order[] calldata orders)
+        external
+        ownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT)
+    {
         _verifySellOrders(orders);
 
         // Skip overflow check as for loop is indexed starting at zero.
@@ -460,9 +608,15 @@ contract XmobExchangeCore is
     function isValidSignature(
         bytes32 _orderHashDigest,
         bytes calldata _signature
-    ) external view returns (bytes4) {
+    )
+        external
+        view
+        ownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT) // only selling needs signature
+        returns (bytes4)
+    {
         //TODO ECDSA ECDSA.recover(hash, v, r, s);f
-        // only allow seaport contract to check
+        // only allow seaport contract to call
         require(msg.sender == SEAPORT_CORE, "only seaport");
 
         // must use special magic signature placeholder
@@ -475,44 +629,78 @@ contract XmobExchangeCore is
             "orderHash not register"
         );
 
-        return MAGICVALUE;
+        return MAGIC_VALUE;
     }
 
     /** @dev Distribute profits */
-    function settlementAllocation(bool takeTransferFee) external {
-        require(canClaim == false, "already can claim");
-
-        WETH9Interface weth9 = WETH9Interface(WETH_ADDR);
-
-        uint256 amt = weth9.balanceOf(address(this));
-        if (amt > 0) {
-            weth9.withdraw(amt);
-        }
-
-        amt = address(this).balance;
+    function settlementAllocation()
+        external
+        unownedNFT
+        requireStatus(MobStatus.NFT_BOUGHT)
+    {
+        uint256 amt = address(this).balance;
         require(amt > 0, "Amt must gt 0");
 
-        canClaim = true;
-
-        // check if fee is needed
-        if (takeTransferFee && cost == 0 && fee > 0) {
-            cost = fee;
-            amt = address(this).balance - fee;
-            payable(owner()).transfer(fee);
-        }
+        _applyNextStatus();
 
         for (uint256 i = 0; i < members.length; i++) {
             uint256 share = memberDetails[members[i]];
-            settlements[members[i]] = (amt / amountTotal) * share;
+            settlements[members[i]] = (amt / metadata.raisedAmount) * share;
         }
 
         emit Settlement(amt, block.timestamp);
     }
 
-    /** @dev receive income  */
-    function claim() public {
-        require(canClaim == true, "claim not started");
+    /** @dev Distribute profits after deadline,
+     *  use for two situation
+     *      1. nft balance attacking(contract already sold nft)
+     *      2. nft can not be sold after deadline
+     *
+     * Note: another way to deal with nft balance attacking
+     * is to continually sell the new receieved attacking nft
+     * to empty the balance so that settlement can be called.
+     * In that case, members might gain some extra profit,
+     * and there remains little motivation for attacker to do that.
+     */
+    function settlementAfterDeadline()
+        external
+        deadlineReached
+        requireStatus(MobStatus.NFT_BOUGHT)
+    {
+        uint256 amt = address(this).balance;
+        require(amt > 0, "Amt must gt 0");
 
+        _applyNextStatus();
+
+        for (uint256 i = 0; i < members.length; i++) {
+            uint256 share = memberDetails[members[i]];
+            settlements[members[i]] = (amt / metadata.raisedAmount) * share;
+        }
+
+        emit SettlementAfterDeadline(amt, block.timestamp);
+    }
+
+    /** @dev refund after deadline, use for buy failed */
+    function settlementAfterBuyFailed()
+        external
+        deadlineReached
+        requireStatus(MobStatus.RAISE_SUCCESS)
+    {
+        uint256 amt = address(this).balance;
+        require(amt > 0, "Amt must gt 0");
+
+        _applyNextStatus();
+
+        for (uint256 i = 0; i < members.length; i++) {
+            uint256 share = memberDetails[members[i]];
+            settlements[members[i]] = (amt / metadata.raisedAmount) * share;
+        }
+
+        emit SettlementAfterBuyFailed(amt);
+    }
+
+    /** @dev receive income  */
+    function claim() public requireStatus(MobStatus.CAN_CLAIM) {
         uint256 amt = settlements[msg.sender];
         if (amt > 0) {
             settlements[msg.sender] = 0;
@@ -526,7 +714,7 @@ contract XmobExchangeCore is
             }
         }
         if (isAllClaimed) {
-            canClaim = false;
+            _applyNextStatus();
         }
 
         if (amt > 0) {
@@ -534,44 +722,22 @@ contract XmobExchangeCore is
         }
     }
 
-    function mobItem()
-        public
-        view
-        returns (
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256
-        )
+    function _applyNextStatus() internal {
+        metadata.status = MobStatus(uint256(metadata.status) + 1);
+    }
+
+    function _getTargetMode(uint8 mode)
+        internal
+        pure
+        returns (TargetMode targetMode)
     {
-        return (
-            amountTotal,
-            raisedTotal,
-            takeProfitPrice,
-            stopLossPrice,
-            deadline,
-            raisedAmountDeadline
-        );
-    }
-
-    function balanceAll() public view returns (uint256, uint256) {
-        uint256 eth = address(this).balance;
-        uint256 wethbalance = WETH9Interface(WETH_ADDR).balanceOf(
-            address(this)
-        );
-        return (eth, wethbalance);
-    }
-
-    function oracles(address addr) public view returns (bool) {
-        return XmobManageInterface(owner()).oracles(addr);
-    }
-
-    // todo: remove this
-    // only for local test
-    function setWeth9Address(address weth9) external {
-        WETH_ADDR = weth9;
+        if (mode == uint256(TargetMode.RESTRICT)) {
+            return TargetMode.RESTRICT;
+        } else if (mode == uint256(TargetMode.FULL_OPEN)) {
+            return TargetMode.RESTRICT;
+        } else {
+            revert("invalid target mode");
+        }
     }
 
     // todo: remove this
@@ -579,6 +745,6 @@ contract XmobExchangeCore is
     function setSeaportAddress(address seaport) external {
         SEAPORT_CORE = seaport;
         // Approve All Token Nft-Id For SeaportCore contract
-        NftCommon(token).setApprovalForAll(SEAPORT_CORE, true);
+        ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
     }
 }

@@ -7,6 +7,11 @@ interface SeaportInterface {
         payable
         returns (bool fulfilled);
 
+    function fulfillOrder(Order calldata order, bytes32 fulfillerConduitKey)
+        external
+        payable
+        returns (bool fulfilled);
+
     function validate(Order[] calldata orders)
         external
         returns (bool validated);

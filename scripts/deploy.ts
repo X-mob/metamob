@@ -21,11 +21,6 @@ export async function deployDeps() {
   const seaport = await Seaport.deploy(conduitController.address);
   await seaport.deployed();
 
-  // deploy WETH9 contract
-  const Weth9 = await ethers.getContractFactory("WETH9");
-  const weth9 = await Weth9.deploy();
-  await weth9.deployed();
-
   // deploy test ERC721 token
   const TestERC721 = await ethers.getContractFactory("TestERC721");
   const testERC721 = await TestERC721.deploy();
@@ -34,7 +29,6 @@ export async function deployDeps() {
   return {
     seaport,
     conduitController,
-    weth9,
     testERC721,
   };
 }

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
+// Mob
+uint256 constant MINIMAL_RAISE_TARGET = 1000000000000000; // 0.001 ETH
+uint256 constant MINIMAL_FEE = 25000000000000; // 0.000025 ETH
+
+// below taken from seaport
 uint256 constant EIP712_Order_size = 0x180;
 uint256 constant EIP712_OfferItem_size = 0xc0;
 uint256 constant EIP712_ConsiderationItem_size = 0xe0;

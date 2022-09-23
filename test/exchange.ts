@@ -2,7 +2,6 @@ import { expect } from "chai";
 import { constants } from "ethers";
 import { ethers } from "hardhat";
 import {
-  WETH9,
   TestERC721,
   XmobExchangeCore,
   XmobManage,
@@ -15,9 +14,10 @@ import {
 } from "../scripts/utils";
 import { initSomeWalletAccount } from "../scripts/utils/helper";
 import { deploy } from "../scripts/deploy";
+import { TargetMode } from "../scripts/utils/type";
+import { setFeeRate } from "../scripts/setup";
 
 describe("XmobExchangeCore", function () {
-  let weth9: WETH9;
   let testERC721: TestERC721;
   let seaport: Seaport;
   let exchangeCore: XmobExchangeCore;
@@ -29,12 +29,15 @@ describe("XmobExchangeCore", function () {
   beforeEach(async () => {
     // deploy all contracts
     const contracts = await deploy();
-    weth9 = contracts.weth9;
     testERC721 = contracts.testERC721;
     seaport = contracts.seaport;
     exchangeCore = contracts.exchangeCore;
     xmobManage = contracts.xmobManage;
 
+    // setup
+    await setFeeRate(xmobManage.address, 0);
+
+    // utils functions exports
     const { chainId } = await ethers.provider.getNetwork();
     ({ createMobAndNftOrder, createMobSellingOrder } = await seaportFixture(
       chainId,
@@ -51,13 +54,15 @@ describe("XmobExchangeCore", function () {
 
     const _creator = owner.address;
     const _token = "0x" + "00".repeat(20);
+    const _tokenId = 1;
     const _fee = 1;
-    const _raisedTotal = ethers.utils.parseEther("0.0001");
+    const _raiseTarget = ethers.utils.parseEther("0.0001");
     const _takeProfitPrice = 25;
     const _stopLossPrice = 1;
-    const _raisedAmountDeadline = Date.now() + 1000000;
+    const _raiseDeadline = Date.now() + 1000000;
     const _deadline = Date.now() + 10000000;
-    const _mobName = "test mob";
+    const _targetMode = TargetMode.FULL_OPEN;
+    const _name = "test mob";
 
     await expect(
       exchangeCore
@@ -65,13 +70,15 @@ describe("XmobExchangeCore", function () {
         .initialize(
           _creator,
           _token,
+          _tokenId,
           _fee,
-          _raisedTotal,
+          _raiseTarget,
           _takeProfitPrice,
           _stopLossPrice,
-          _raisedAmountDeadline,
+          _raiseDeadline,
           _deadline,
-          _mobName,
+          _targetMode,
+          _name,
           {
             value: ethers.utils.parseEther("0.0001"), // 0.1 eth,
           }
@@ -79,118 +86,30 @@ describe("XmobExchangeCore", function () {
     ).to.be.revertedWith("Initializable: contract is already initialized");
   });
 
-  it("Init a new mob process", async function () {
+  it("Init a new mob", async function () {
     const [owner] = await ethers.getSigners();
 
     const _token = testERC721.address;
     const _tokenId = 1;
-    const _raisedTotal = ethers.utils.parseEther("0.0001");
+    const _raiseTarget = ethers.utils.parseEther("0.001");
     const _takeProfitPrice = 25;
     const _stopLossPrice = 1;
-    const _raisedAmountDeadline = Date.now() + 100000;
-    const _deadline = _raisedAmountDeadline + 100000;
-    const _mobName = "test mob";
+    const _raiseDeadline = Date.now() + 100000;
+    const _deadline = _raiseDeadline + 100000;
+    const _targetMode = TargetMode.FULL_OPEN;
+    const _name = "test mob";
 
     await checkCreateMob(owner, xmobManage, {
       _token,
       _tokenId,
-      _raisedTotal,
+      _raiseTarget,
       _takeProfitPrice,
       _stopLossPrice,
-      _raisedAmountDeadline,
+      _raiseDeadline: _raiseDeadline,
       _deadline,
-      _mobName,
+      _targetMode,
+      _name,
     });
-  });
-
-  it("Mob full life cycle", async function () {
-    const [owner, m1, m2, m3, n5] = await ethers.getSigners();
-
-    // create a mob
-    const _token = testERC721.address;
-    const _tokenId = 1;
-    const _raisedTotal = ethers.utils.parseEther("3");
-    const _takeProfitPrice = 25;
-    const _stopLossPrice = 1;
-    const _raisedAmountDeadline = Date.now() + 100000;
-    const _deadline = _raisedAmountDeadline + 100000;
-    const _mobName = "test mob";
-
-    const mob = await checkCreateMob(
-      owner,
-      xmobManage,
-      {
-        _token,
-        _tokenId,
-        _raisedTotal,
-        _takeProfitPrice,
-        _stopLossPrice,
-        _raisedAmountDeadline,
-        _deadline,
-        _mobName,
-      },
-      weth9.address,
-      seaport.address
-    );
-
-    // set fee
-    const feeRate = 20;
-    await (await xmobManage.setFee(feeRate)).wait();
-    expect(await xmobManage.feeRate()).to.be.equal(feeRate);
-
-    // member deposit
-    const depositValue = ethers.utils.parseEther("1");
-    {
-      const tx = await mob
-        .connect(m1)
-        .joinPay(m1.address, { value: depositValue });
-      await tx.wait();
-      expect(await mob.memberDetails(m1.address)).to.be.equal(depositValue);
-    }
-
-    {
-      const tx = await mob
-        .connect(m2)
-        .joinPay(m2.address, { value: depositValue });
-      await tx.wait();
-      expect(await mob.memberDetails(m2.address)).to.be.equal(depositValue);
-    }
-
-    {
-      const tx = await mob
-        .connect(m3)
-        .joinPay(m3.address, { value: depositValue });
-      await tx.wait();
-      expect(await mob.memberDetails(m3.address)).to.be.equal(depositValue);
-    }
-
-    expect(
-      mob.connect(n5).joinPay(m1.address, { value: depositValue })
-    ).to.be.revertedWith("Insufficient quota");
-
-    // check mob balances
-    {
-      const balances = await mob.balanceAll();
-      expect(balances[0]).to.be.equal(ethers.utils.parseEther("0"));
-      expect(balances[1]).to.be.equal(_raisedTotal);
-    }
-
-    // distribute fund and claim
-    {
-      // distribute
-      const beforeBal = await mob.provider.getBalance(m1.address);
-      await (await mob.settlementAllocation(false)).wait();
-      expect(await mob.settlements(m1.address)).to.be.equal(depositValue);
-
-      // claim
-      await (await mob.connect(m1).claim()).wait();
-      const afterBal = await mob.provider.getBalance(m1.address);
-      const diff = afterBal.sub(beforeBal).toString();
-      // consider gas fee, which should be less than 0.1 normally
-      expect(diff).to.be.gte(depositValue.sub(ethers.utils.parseEther("0.1")));
-      // the balance difference should be less than the fund return
-      expect(diff).to.be.lte(depositValue);
-    }
   });
 
   it("Mob buyNow => validateSelling => claim flow", async function () {
@@ -208,29 +127,33 @@ describe("XmobExchangeCore", function () {
     const earn = ethers.utils.parseEther("1");
     const depositValue = ethers.utils.parseEther("1");
 
-    const _raisedTotal = firstHandPrice;
+    const _raiseTarget = firstHandPrice;
     const _takeProfitPrice = secondHandPrice;
     const _stopLossPrice = 1;
-    const _raisedAmountDeadline = Date.now() + 100000;
-    const _deadline = _raisedAmountDeadline + 100000;
+    const _raiseDeadline = Date.now() + 100000;
+    const _deadline = _raiseDeadline + 100000;
+    const _targetMode = TargetMode.FULL_OPEN;
 
     const { mob, basicOrderParameters } = await createMobAndNftOrder(
       { admin: owner, seller, buyer1, buyer2, buyer3 },
       { token, tokenId, testERC721 },
-      { seaport, xmobManage, weth9 },
+      { seaport, xmobManage },
       {
         depositValue,
         firstHandPrice,
-        _raisedTotal,
-        _raisedAmountDeadline,
+        _raiseTarget,
+        _raiseDeadline,
         _takeProfitPrice,
         _stopLossPrice,
         _deadline,
+        _targetMode,
       }
     );
 
-    // buyNow
-    await (await mob.connect(randomUser).buyNow(basicOrderParameters)).wait();
+    // buyBasicOrder
+    await (
+      await mob.connect(randomUser).buyBasicOrder(basicOrderParameters)
+    ).wait();
     expect(await testERC721.balanceOf(mob.address)).to.equal(1);
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(mob.address);
 
@@ -260,14 +183,15 @@ describe("XmobExchangeCore", function () {
     ).wait();
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(secondBuyer.address);
     expect(await testERC721.balanceOf(mob.address)).to.equal(0);
-    expect((await mob.balanceAll())[0]).to.equal(secondHandPrice);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(
+      secondHandPrice
+    );
 
     // settlement
-    expect(await mob.amountTotal()).to.equal(firstHandPrice);
+    expect((await mob.metadata()).raisedAmount).to.equal(firstHandPrice);
     expect(await mob.memberDetails(buyer1.address)).to.equal(depositValue);
 
-    await (await mob.connect(randomUser).settlementAllocation(false)).wait();
+    await (await mob.connect(randomUser).settlementAllocation()).wait();
 
     expect(await mob.settlements(buyer1.address)).to.equal(
       ethers.utils.parseEther("2")
@@ -297,8 +221,7 @@ describe("XmobExchangeCore", function () {
     expect(diff).to.be.lte(depositValue.add(earn));
 
     // contract should left no money
-    expect((await mob.balanceAll())[0]).to.equal(0);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(0);
   });
 
   it("Mob buyNow => registerSellingOrder => claim flow", async function () {
@@ -316,29 +239,33 @@ describe("XmobExchangeCore", function () {
     const earn = ethers.utils.parseEther("1");
     const depositValue = ethers.utils.parseEther("1");
 
-    const _raisedTotal = firstHandPrice;
+    const _raiseTarget = firstHandPrice;
     const _takeProfitPrice = secondHandPrice;
     const _stopLossPrice = 1;
-    const _raisedAmountDeadline = Date.now() + 100000;
-    const _deadline = _raisedAmountDeadline + 100000;
+    const _raiseDeadline = Date.now() + 100000;
+    const _deadline = _raiseDeadline + 100000;
+    const _targetMode = TargetMode.FULL_OPEN;
 
     const { mob, basicOrderParameters } = await createMobAndNftOrder(
       { admin: owner, seller, buyer1, buyer2, buyer3 },
       { token, tokenId, testERC721 },
-      { seaport, xmobManage, weth9 },
+      { seaport, xmobManage },
       {
         depositValue,
         firstHandPrice,
-        _raisedTotal,
-        _raisedAmountDeadline,
+        _raiseTarget,
+        _raiseDeadline,
         _takeProfitPrice,
         _stopLossPrice,
         _deadline,
+        _targetMode,
       }
     );
 
     // buyNow
-    await (await mob.connect(randomUser).buyNow(basicOrderParameters)).wait();
+    await (
+      await mob.connect(randomUser).buyBasicOrder(basicOrderParameters)
+    ).wait();
     expect(await testERC721.balanceOf(mob.address)).to.equal(1);
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(mob.address);
 
@@ -371,14 +298,15 @@ describe("XmobExchangeCore", function () {
 
     expect(await testERC721.ownerOf(tokenId)).to.be.equal(secondBuyer.address);
     expect(await testERC721.balanceOf(mob.address)).to.equal(0);
-    expect((await mob.balanceAll())[0]).to.equal(secondHandPrice);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(
+      secondHandPrice
+    );
 
     // settlement
-    expect(await mob.amountTotal()).to.equal(firstHandPrice);
+    expect((await mob.metadata()).raisedAmount).to.equal(firstHandPrice);
     expect(await mob.memberDetails(buyer1.address)).to.equal(depositValue);
 
-    await (await mob.connect(randomUser).settlementAllocation(false)).wait();
+    await (await mob.connect(randomUser).settlementAllocation()).wait();
 
     expect(await mob.settlements(buyer1.address)).to.equal(
       ethers.utils.parseEther("2")
@@ -408,8 +336,7 @@ describe("XmobExchangeCore", function () {
     expect(diff).to.be.lte(depositValue.add(earn));
 
     // contract should left no money
-    expect((await mob.balanceAll())[0]).to.equal(0);
-    expect((await mob.balanceAll())[1]).to.equal(0);
+    expect(await ethers.provider.getBalance(mob.address)).to.equal(0);
   });
 
   // todo: add new function to support advance buying
