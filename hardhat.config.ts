@@ -8,7 +8,7 @@ import "hardhat-gas-reporter";
 import "solidity-coverage";
 import { env } from "process";
 
-dotenv.config();
+dotenv.config({ path: "./.env" });
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -67,7 +67,7 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {},
     rinkeby: {
-      url: `https://rinkeby.infura.io/v3/${env.INFRUA_KEY}`,
+      url: `https://rinkeby.infura.io/v3/${env.INFURA_KEY}`,
       accounts: env.PRIVATE_KEY ? [env.PRIVATE_KEY] : [],
     },
   },

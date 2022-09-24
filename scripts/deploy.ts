@@ -49,7 +49,7 @@ export async function deployMetamob() {
 }
 
 async function main() {
-  const contracts = await deploy();
+  const contracts = await deployMetamob();
   const keys = Object.keys(contracts);
   for (const key of keys) {
     console.log(`${key}: ${(contracts as any)[key].address}`);
