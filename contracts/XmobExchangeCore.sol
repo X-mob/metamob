@@ -60,6 +60,12 @@ contract XmobExchangeCore is
         _;
     }
 
+    // Whether the mob deadline has reached
+    modifier deadlineOpen() {
+        require(block.timestamp < metadata.deadline, "deadline reached");
+        _;
+    }
+
     // Whether the raising has close the time window
     modifier fundRaiseTimeClosed() {
         require(block.timestamp > metadata.raiseDeadline, "fund raising");
@@ -249,6 +255,7 @@ contract XmobExchangeCore is
     function buyBasicOrder(BasicOrderParameters calldata parameters)
         external
         payable
+        deadlineOpen
         fundRaiseMeetsTarget
         requireStatus(MobStatus.RAISE_SUCCESS)
         returns (bool isFulFilled)
@@ -264,6 +271,11 @@ contract XmobExchangeCore is
         if (isSuccess) {
             emit Buy(parameters.offerer, address(this).balance);
             _applyNextStatus();
+
+            // record the token id if it is full open mode
+            if (metadata.targetMode == TargetMode.FULL_OPEN) {
+                metadata.tokenId = parameters.offerIdentifier;
+            }
         }
 
         return isSuccess;
@@ -295,6 +307,7 @@ contract XmobExchangeCore is
     function buyOrder(Order calldata order, bytes32 fulfillerConduitKey)
         external
         payable
+        deadlineOpen
         fundRaiseMeetsTarget
         requireStatus(MobStatus.RAISE_SUCCESS)
         returns (bool isFulFilled)
@@ -310,6 +323,14 @@ contract XmobExchangeCore is
 
         if (isSuccess) {
             emit Buy(order.parameters.offerer, address(this).balance);
+
+            // record the token id if it is full open mode
+            if (metadata.targetMode == TargetMode.FULL_OPEN) {
+                metadata.tokenId = order
+                    .parameters
+                    .offer[0]
+                    .identifierOrCriteria;
+            }
         }
 
         return isSuccess;
@@ -380,6 +401,7 @@ contract XmobExchangeCore is
     function validateSellOrders(Order[] calldata orders)
         external
         ownedNFT
+        deadlineOpen
         requireStatus(MobStatus.NFT_BOUGHT)
         returns (bool isValidated)
     {
@@ -483,6 +505,7 @@ contract XmobExchangeCore is
     function registerSellOrder(Order[] calldata orders)
         external
         ownedNFT
+        deadlineOpen
         requireStatus(MobStatus.NFT_BOUGHT)
     {
         _verifySellOrders(orders);
