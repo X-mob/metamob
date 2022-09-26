@@ -70,6 +70,11 @@ const config: HardhatUserConfig = {
       url: `https://rinkeby.infura.io/v3/${env.INFURA_KEY}`,
       accounts: env.PRIVATE_KEY ? [env.PRIVATE_KEY] : [],
     },
+
+    goerli: {
+      url: `https://goerli.infura.io/v3/${env.INFURA_KEY}`,
+      accounts: env.PRIVATE_KEY ? [env.PRIVATE_KEY] : [],
+    },
   },
   paths: {
     sources: "./contracts",
