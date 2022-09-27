@@ -347,14 +347,6 @@ contract XmobExchangeCore is
         OrderParameters calldata orderParameters = order.parameters;
         // check order parameters
         require(orderParameters.offer.length == 1, "offer length !=1");
-        require(
-            orderParameters.consideration.length == 1,
-            "consideration length !=1"
-        );
-        require(
-            orderParameters.totalOriginalConsiderationItems == uint256(1),
-            "OriginalConsider != 1"
-        );
 
         _verifyBuyOrderOfferItem(orderParameters.offer[0]);
         _verifyBuyOrderConsiderationItem(orderParameters.consideration[0]);
