@@ -323,6 +323,7 @@ contract XmobExchangeCore is
 
         if (isSuccess) {
             emit Buy(order.parameters.offerer, address(this).balance);
+            _applyNextStatus();
 
             // record the token id if it is full open mode
             if (metadata.targetMode == TargetMode.FULL_OPEN) {
@@ -704,7 +705,8 @@ contract XmobExchangeCore is
         uint256 amt = address(this).balance;
         require(amt > 0, "Amt must gt 0");
 
-        _applyNextStatus();
+        // raise_success to can_claim
+        _applyNextStatusWithJump(2);
 
         for (uint256 i = 0; i < members.length; i++) {
             uint256 share = memberDetails[members[i]];
@@ -739,6 +741,10 @@ contract XmobExchangeCore is
 
     function _applyNextStatus() internal {
         metadata.status = MobStatus(uint256(metadata.status) + 1);
+    }
+
+    function _applyNextStatusWithJump(uint8 steps) internal {
+        metadata.status = MobStatus(uint256(metadata.status) + steps);
     }
 
     function _getTargetMode(uint8 mode)
