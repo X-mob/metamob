@@ -17,8 +17,15 @@ export async function setSeaport(
   const xmobManage = XmobManage.attach(xmobManageAddress);
 
   const address = await xmobManage.mobsById(mobId);
+  setSeaportForMob(address, seaportAddr);
+}
+
+export async function setSeaportForMob(
+  mobAddress: string,
+  seaportAddr: string
+) {
   const Mob = await ethers.getContractFactory("XmobExchangeCore");
-  const mob = Mob.attach(address);
+  const mob = Mob.attach(mobAddress);
 
   // set seaport address for test
   await (await mob.setSeaportAddress(seaportAddr)).wait();
