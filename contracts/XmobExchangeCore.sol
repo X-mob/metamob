@@ -766,7 +766,7 @@ contract XmobExchangeCore is
 
     // todo: remove this
     // only for local test
-    function setSeaportAddress(address seaport) external onlyOwner {
+    function setSeaportAddress(address seaport) external {
         SEAPORT_CORE = seaport;
         // Approve All Token Nft-Id For SeaportCore contract
         ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
