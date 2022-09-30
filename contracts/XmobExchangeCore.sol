@@ -34,6 +34,8 @@ contract XmobExchangeCore is
     MobMetadata public metadata;
     address[] public members;
 
+    mapping(bytes32 => bool) public allowConduitKeys;
+
     mapping(address => uint256) public memberDetails;
 
     mapping(address => uint256) public settlements;
@@ -439,8 +441,9 @@ contract XmobExchangeCore is
                     "wrong orderType"
                 );
                 require(
-                    orderParameters.conduitKey == bytes32(0),
-                    "conduitKey != 0"
+                    orderParameters.conduitKey == bytes32(0) ||
+                        allowConduitKeys[orderParameters.conduitKey] == true,
+                    "conduitKey not allowed"
                 );
 
                 // only check if first offer/consideration meet requirement
@@ -763,9 +766,23 @@ contract XmobExchangeCore is
 
     // todo: remove this
     // only for local test
-    function setSeaportAddress(address seaport) external {
+    function setSeaportAddress(address seaport) external onlyOwner {
         SEAPORT_CORE = seaport;
         // Approve All Token Nft-Id For SeaportCore contract
         ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
+    }
+
+    function setAllowConduitKey(bytes32 key, address conduit)
+        external
+        onlyOwner
+    {
+        if (allowConduitKeys[key] == false) {
+            allowConduitKeys[key] = true;
+
+            // Approve All Token Nft-Id For conduit contract
+            ERC721(metadata.token).setApprovalForAll(conduit, true);
+        } else {
+            revert("conduitKey already allow");
+        }
     }
 }
