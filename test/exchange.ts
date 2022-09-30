@@ -401,7 +401,6 @@ describe("XmobExchangeCore", function () {
       tokenId,
       sellingPrice: secondHandPrice,
     });
-
     await (await mob.registerSellOrder([sellingOrder])).wait();
 
     await (

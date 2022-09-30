@@ -635,8 +635,6 @@ contract XmobExchangeCore is
         returns (bytes4)
     {
         //TODO ECDSA ECDSA.recover(hash, v, r, s);f
-        // only allow seaport contract to call
-        require(msg.sender == SEAPORT_CORE, "only seaport");
 
         // must use special magic signature placeholder
         require(
@@ -772,10 +770,8 @@ contract XmobExchangeCore is
         ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
     }
 
-    function setAllowConduitKey(bytes32 key, address conduit)
-        external
-        onlyOwner
-    {
+    // todo: should add onlyOwner modifier
+    function setAllowConduitKey(bytes32 key, address conduit) external {
         if (allowConduitKeys[key] == false) {
             allowConduitKeys[key] = true;
 

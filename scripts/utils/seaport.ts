@@ -3,7 +3,7 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { BigNumber, BigNumberish, constants, Contract, Wallet } from "ethers";
-import { keccak256, toUtf8Bytes } from "ethers/lib/utils";
+import { keccak256, toUtf8Bytes, _TypedDataEncoder } from "ethers/lib/utils";
 import {
   Seaport,
   TestERC721,
@@ -513,6 +513,29 @@ export const calculateOrderHash = (orderComponents: OrderComponents) => {
   );
 
   return derivedOrderHash;
+};
+
+// note: do not support ens name in the filed
+// todo: validate this functions
+export const calculateOrderHashSignDigest = (
+  orderComponents: OrderComponents,
+  chainId: number,
+  seaportAddr: string
+) => {
+  // Required for EIP712 signing
+  const domainData = {
+    name: "Seaport",
+    version: VERSION,
+    chainId,
+    verifyingContract: seaportAddr,
+  };
+
+  const signDigest = _TypedDataEncoder.hash(
+    domainData,
+    orderType,
+    orderComponents
+  );
+  return signDigest;
 };
 
 export const orderType = Object.freeze({
