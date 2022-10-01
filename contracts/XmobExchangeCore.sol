@@ -171,12 +171,21 @@ contract XmobExchangeCore is
         TargetMode targetMode = _getTargetMode(_targetMode);
         metadata.targetMode = targetMode;
 
+        // Approve All Token Nft-Id For SeaportCore contract
+        ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
+        // Register well-known opensea conduitKey
+        bytes32 key = 0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000;
+        address conduit = 0x1E0049783F008A0085193E00003D00cd54003c71;
+        if (allowConduitKeys[key] == false) {
+            allowConduitKeys[key] = true;
+
+            // Approve All Token Nft-Id For conduit contract
+            ERC721(metadata.token).setApprovalForAll(conduit, true);
+        }
+
         if (msg.value > 0) {
             memberDeposit(_creator, msg.value);
         }
-
-        // Approve All Token Nft-Id For SeaportCore contract
-        ERC721(_token).setApprovalForAll(SEAPORT_CORE, true);
     }
 
     /**
@@ -634,8 +643,6 @@ contract XmobExchangeCore is
         requireStatus(MobStatus.NFT_BOUGHT) // only selling needs signature
         returns (bytes4)
     {
-        //TODO ECDSA ECDSA.recover(hash, v, r, s);f
-
         // must use special magic signature placeholder
         require(
             keccak256(_signature) == keccak256(MAGIC_SIGNATURE),
