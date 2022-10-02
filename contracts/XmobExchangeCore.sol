@@ -171,8 +171,11 @@ contract XmobExchangeCore is
         TargetMode targetMode = _getTargetMode(_targetMode);
         metadata.targetMode = targetMode;
 
+        // TODO remove this line in production since address will be changed to const
+        SEAPORT_CORE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
         // Approve All Token Nft-Id For SeaportCore contract
         ERC721(metadata.token).setApprovalForAll(SEAPORT_CORE, true);
+
         // Register well-known opensea conduitKey
         bytes32 key = 0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000;
         address conduit = 0x1E0049783F008A0085193E00003D00cd54003c71;
